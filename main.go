@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	_ "image/png"
 	"log"
@@ -12,25 +13,21 @@ import (
 )
 
 const (
-	screenWidth  = 320
-	screenHeight = 240
-	gridWidth    = 15 * 16
-	gridHeight   = 15 * 16
-	cellSize     = 16
+	cellSize = 16
 )
 
 var easy = GameDifficulty{
-	GridDimensions: GridDimensions{Columns: 9, Rows: 9},
+	GridDimensions: GridDimensions{Cols: 9, Rows: 9},
 	NumberOfMines:  10,
 }
 
 var medium = GameDifficulty{
-	GridDimensions: GridDimensions{Columns: 16, Rows: 16},
+	GridDimensions: GridDimensions{Cols: 16, Rows: 16},
 	NumberOfMines:  40,
 }
 
 var hard = GameDifficulty{
-	GridDimensions: GridDimensions{Columns: 30, Rows: 16},
+	GridDimensions: GridDimensions{Cols: 30, Rows: 16},
 	NumberOfMines:  99,
 }
 
@@ -39,7 +36,9 @@ var hard = GameDifficulty{
 // }
 
 type Game struct {
-	Dificulty GameDifficulty
+	// Dificulty GameDifficulty
+	Minesweeper Minesweeper
+	Sprite      *Sprite
 }
 
 // var cellImage, _, err = ebitenutil.NewImageFromFile("assets/sprites/board.png")
@@ -72,14 +71,14 @@ type CellState struct {
 }
 
 type Sprite struct {
-	image    *ebiten.Image
-	position Coordinates
-	size     int
+	Image    *ebiten.Image
+	Position Coordinates
+	Size     int
 }
 
 type GridDimensions struct {
-	Columns int
-	Rows    int
+	Cols int
+	Rows int
 }
 
 type GameDifficulty struct {
@@ -93,9 +92,10 @@ type Minesweeper struct {
 }
 
 func (m *Minesweeper) createBoard(dificulty GameDifficulty) {
+	m.Board = make(map[Coordinates]CellState)
 	mines := generateMinePositions(dificulty.GridDimensions, dificulty.NumberOfMines)
 
-	for i := 0; i < dificulty.GridDimensions.Columns; i++ {
+	for i := 0; i < dificulty.GridDimensions.Cols; i++ {
 		for j := 0; j < dificulty.GridDimensions.Rows; j++ {
 			pos := Coordinates{X: i, Y: j}
 			if _, exists := mines[pos]; exists {
@@ -107,13 +107,17 @@ func (m *Minesweeper) createBoard(dificulty GameDifficulty) {
 	}
 }
 
+func (m *Minesweeper) UpdateCellState(position Coordinates, state CellState) {
+	m.Board[position] = state
+}
+
 func generateMinePositions(dimension GridDimensions, numberOfMines int) map[Coordinates]bool {
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	mines := make(map[Coordinates]bool)
 
 	for len(mines) < numberOfMines {
-		x := rnd.Intn(dimension.Columns)
+		x := rnd.Intn(dimension.Cols)
 		y := rnd.Intn(dimension.Rows)
 		pos := Coordinates{X: x, Y: y}
 
@@ -124,33 +128,46 @@ func generateMinePositions(dimension GridDimensions, numberOfMines int) map[Coor
 	return mines
 }
 
-func RenderBoard() {
-	board := Minesweeper{}
-	board.createBoard(medium)
-}
-
 func (g *Game) Update() error {
+	x, y := ebiten.CursorPosition()
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		position := Coordinates{x / cellSize, y / cellSize}
+		cellState := g.Minesweeper.Board[position]
+		fmt.Println(cellState)
+		cellState.isRevealed = true
+		g.Minesweeper.UpdateCellState(
+			position, cellState)
+
+	}
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
+	}
 	return nil
 }
 
-func (g *Game) Draw(screen *ebiten.Image) {
-	board := Minesweeper{}
-	board.createBoard(g.Dificulty)
+func (g *Game) RenderBoard(screen *ebiten.Image) {
+	for boardPosition, cellState := range g.Minesweeper.Board {
+		var baseSpriteCell *ebiten.Image
+		opts := &ebiten.DrawImageOptions{}
 
-	sprite, err := LoadSprite()
-	if err != nil {
-		log.Fatal(err)
-	}
+		tx := float64(boardPosition.X * g.Sprite.Size)
+		ty := float64(boardPosition.Y * g.Sprite.Size)
 
-	opts := &ebiten.DrawImageOptions{}
-	for boardPosition := range board.Board {
-		tx := float64(boardPosition.X * sprite.size)
-		ty := float64(boardPosition.Y * sprite.size)
 		opts.GeoM.Translate(tx, ty)
-	}
 
-	baseSpriteCell := sprite.image.SubImage(image.Rect(0, 0, sprite.size, sprite.size)).(*ebiten.Image)
-	screen.DrawImage(baseSpriteCell, opts)
+		if !cellState.isRevealed {
+			baseSpriteCell = g.Sprite.Image.SubImage(image.Rect(0, 0, g.Sprite.Size, g.Sprite.Size)).(*ebiten.Image)
+		} else if cellState.isMine && cellState.isRevealed {
+			baseSpriteCell = g.Sprite.Image.SubImage(image.Rect(cellSize*6, 0, g.Sprite.Size*7, g.Sprite.Size)).(*ebiten.Image)
+		} else if !cellState.isMine && cellState.minesAround == 0 && cellState.isRevealed {
+			baseSpriteCell = g.Sprite.Image.SubImage(image.Rect(cellSize, 0, g.Sprite.Size*2, g.Sprite.Size)).(*ebiten.Image)
+		}
+		screen.DrawImage(baseSpriteCell, opts)
+
+	}
+}
+
+func (g *Game) Draw(screen *ebiten.Image) {
+	g.RenderBoard(screen)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -159,7 +176,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 
 func LoadSprite() (*Sprite, error) {
 	spriteImage, _, err := ebitenutil.NewImageFromFile("assets/sprites/board.png")
-	sprite := Sprite{image: spriteImage, position: Coordinates{X: 0, Y: 0}, size: 16}
+	sprite := Sprite{Image: spriteImage, Position: Coordinates{X: 0, Y: 0}, Size: cellSize}
 
 	return &sprite, err
 }
@@ -168,8 +185,15 @@ func main() {
 	ebiten.SetWindowSize(640, 480)
 	ebiten.SetWindowTitle("Hello, MineSweeper go!")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+	game := Minesweeper{}
+	game.createBoard(medium)
 
-	if err := ebiten.RunGame(&Game{Dificulty: medium}); err != nil {
+	sprite, err := LoadSprite()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err := ebiten.RunGame(&Game{Minesweeper: game, Sprite: sprite}); err != nil {
 		log.Fatal(err)
 	}
 }
