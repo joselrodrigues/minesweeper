@@ -31,14 +31,10 @@ var hard = GameDifficulty{
 	NumberOfMines:  99,
 }
 
-// type Game struct {
-// 	boardSprite *Sprite
-// }
-
 type Game struct {
-	// Dificulty GameDifficulty
-	Minesweeper Minesweeper
-	Sprite      *Sprite
+	Dificulty   GameDifficulty
+	Minesweeper *Minesweeper
+	Sprite      Sprite
 }
 
 // var cellImage, _, err = ebitenutil.NewImageFromFile("assets/sprites/board.png")
@@ -71,9 +67,8 @@ type CellState struct {
 }
 
 type Sprite struct {
-	Image    *ebiten.Image
-	Position Coordinates
-	Size     int
+	Image *ebiten.Image
+	Size  int
 }
 
 type GridDimensions struct {
@@ -174,11 +169,11 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 	return 320, 240
 }
 
-func LoadSprite() (*Sprite, error) {
+func LoadSprite() (Sprite, error) {
 	spriteImage, _, err := ebitenutil.NewImageFromFile("assets/sprites/board.png")
-	sprite := Sprite{Image: spriteImage, Position: Coordinates{X: 0, Y: 0}, Size: cellSize}
+	sprite := Sprite{Image: spriteImage, Size: cellSize}
 
-	return &sprite, err
+	return sprite, err
 }
 
 func main() {
@@ -193,7 +188,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := ebiten.RunGame(&Game{Minesweeper: game, Sprite: sprite}); err != nil {
+	if err := ebiten.RunGame(&Game{Minesweeper: &game, Sprite: sprite}); err != nil {
 		log.Fatal(err)
 	}
 }
