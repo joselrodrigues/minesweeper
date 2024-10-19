@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"image"
 	_ "image/png"
 	"log"
@@ -67,9 +66,9 @@ func (g *Game) createBoard() {
 	grid := g.Dificulty.GridDimensions
 	mines := g.GenerateMinePositions()
 
-	for i := 0; i < grid.Cols; i++ {
-		for j := 0; j < grid.Rows; j++ {
-			pos := Coordinates{X: i, Y: j}
+	for x := 0; x < grid.Cols; x++ {
+		for y := 0; y < grid.Rows; y++ {
+			pos := Coordinates{X: x, Y: y}
 			if _, exists := mines[pos]; exists {
 				g.Board[pos] = CellState{isMine: true, isFlag: false, isRevealed: false, minesAround: 0}
 			} else {
