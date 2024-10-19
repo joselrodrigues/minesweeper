@@ -66,8 +66,8 @@ func (g *Game) createBoard() {
 	grid := g.Dificulty.GridDimensions
 	mines := g.GenerateMinePositions()
 
-	for x := 0; x < grid.Cols; x++ {
-		for y := 0; y < grid.Rows; y++ {
+	for x := 0; x < grid.Rows; x++ {
+		for y := 0; y < grid.Cols; y++ {
 			pos := Coordinates{X: x, Y: y}
 			if _, exists := mines[pos]; exists {
 				g.Board[pos] = CellState{isMine: true, isFlag: false, isRevealed: false, minesAround: 0}
@@ -86,8 +86,8 @@ func (g *Game) GenerateMinePositions() map[Coordinates]bool {
 	mines := g.MinePositions
 
 	for len(mines) < numberOfMines {
-		x := rnd.Intn(grid.Cols)
-		y := rnd.Intn(grid.Rows)
+		x := rnd.Intn(grid.Rows)
+		y := rnd.Intn(grid.Cols)
 		pos := Coordinates{X: x, Y: y}
 
 		if _, exists := mines[pos]; !exists {
