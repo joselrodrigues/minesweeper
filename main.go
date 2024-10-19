@@ -32,9 +32,10 @@ var hard = GameDifficulty{
 }
 
 type Game struct {
-	Board     map[Coordinates]CellState
-	Sprite    Sprite
-	Dificulty GameDifficulty
+	Board         map[Coordinates]CellState
+	MinePositions map[Coordinates]bool
+	Sprite        Sprite
+	Dificulty     GameDifficulty
 }
 
 type Coordinates struct {
@@ -62,9 +63,9 @@ type GameDifficulty struct {
 	GridDimensions GridDimensions
 }
 
-func (g *Game) createBoard(dificulty GameDifficulty) {
+func (g *Game) createBoard() {
 	grid := g.Dificulty.GridDimensions
-	mines := generateMinePositions(dificulty.GridDimensions, dificulty.NumberOfMines)
+	mines := g.GenerateMinePositions()
 
 	for i := 0; i < grid.Cols; i++ {
 		for j := 0; j < grid.Rows; j++ {
@@ -78,14 +79,16 @@ func (g *Game) createBoard(dificulty GameDifficulty) {
 	}
 }
 
-func generateMinePositions(dimension GridDimensions, numberOfMines int) map[Coordinates]bool {
+func (g *Game) GenerateMinePositions() map[Coordinates]bool {
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	mines := make(map[Coordinates]bool)
+	grid := g.Dificulty.GridDimensions
+	numberOfMines := g.Dificulty.NumberOfMines
+	mines := g.MinePositions
 
 	for len(mines) < numberOfMines {
-		x := rnd.Intn(dimension.Cols)
-		y := rnd.Intn(dimension.Rows)
+		x := rnd.Intn(grid.Cols)
+		y := rnd.Intn(grid.Rows)
 		pos := Coordinates{X: x, Y: y}
 
 		if _, exists := mines[pos]; !exists {
@@ -100,7 +103,6 @@ func (g *Game) Update() error {
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		position := Coordinates{x / cellSize, y / cellSize}
 		cellState := g.Board[position]
-		fmt.Println(cellState)
 		cellState.isRevealed = true
 		g.Board[position] = cellState
 	}
@@ -159,12 +161,14 @@ func main() {
 	ebiten.SetWindowTitle("Hello, MineSweeper go!")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	sprite, err := LoadSprite()
+	minePositions := make(map[Coordinates]bool)
 	game := Game{
-		Dificulty: medium,
-		Board:     make(map[Coordinates]CellState),
-		Sprite:    sprite,
+		Dificulty:     medium,
+		Board:         make(map[Coordinates]CellState),
+		Sprite:        sprite,
+		MinePositions: minePositions,
 	}
-	game.createBoard(medium)
+	game.createBoard()
 
 	if err != nil {
 		log.Fatal(err)
