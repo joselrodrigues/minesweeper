@@ -32,43 +32,24 @@ var hard = GameDifficulty{
 }
 
 type Game struct {
-	Dificulty   GameDifficulty
-	Minesweeper *Minesweeper
-	Sprite      Sprite
+	Board     map[Coordinates]CellState
+	Sprite    Sprite
+	Dificulty GameDifficulty
 }
-
-// var cellImage, _, err = ebitenutil.NewImageFromFile("assets/sprites/board.png")
-
-// func DrawHiddenCell(x int, y int, screen *ebiten.Image) {
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-//
-// 	opts := &ebiten.DrawImageOptions{}
-//
-// 	tx := float64(x * cellSize)
-// 	ty := float64(y * cellSize)
-// 	opts.GeoM.Translate(tx, ty)
-//
-// 	baseSpriteCell := cellImage.SubImage(image.Rect(0, 0, cellSize, cellSize)).(*ebiten.Image)
-//
-// 	screen.DrawImage(baseSpriteCell, opts)
-// }
 
 type Coordinates struct {
 	X, Y int
 }
 
 type CellState struct {
+	minesAround int
 	isMine      bool
 	isFlag      bool
 	isRevealed  bool
-	minesAround int
 }
 
 type Sprite struct {
-	Image *ebiten.Image
-	Size  int
+	Image map[string]*ebiten.Image
 }
 
 type GridDimensions struct {
@@ -77,33 +58,24 @@ type GridDimensions struct {
 }
 
 type GameDifficulty struct {
-	GridDimensions GridDimensions
 	NumberOfMines  int
+	GridDimensions GridDimensions
 }
 
-// quizás debería cambiar el nombre de la estructura
-type Minesweeper struct {
-	Board map[Coordinates]CellState
-}
-
-func (m *Minesweeper) createBoard(dificulty GameDifficulty) {
-	m.Board = make(map[Coordinates]CellState)
+func (g *Game) createBoard(dificulty GameDifficulty) {
+	grid := g.Dificulty.GridDimensions
 	mines := generateMinePositions(dificulty.GridDimensions, dificulty.NumberOfMines)
 
-	for i := 0; i < dificulty.GridDimensions.Cols; i++ {
-		for j := 0; j < dificulty.GridDimensions.Rows; j++ {
+	for i := 0; i < grid.Cols; i++ {
+		for j := 0; j < grid.Rows; j++ {
 			pos := Coordinates{X: i, Y: j}
 			if _, exists := mines[pos]; exists {
-				m.Board[pos] = CellState{isMine: true, isFlag: false, isRevealed: false, minesAround: 0}
+				g.Board[pos] = CellState{isMine: true, isFlag: false, isRevealed: false, minesAround: 0}
 			} else {
-				m.Board[pos] = CellState{isMine: false, isFlag: false, isRevealed: false, minesAround: 0}
+				g.Board[pos] = CellState{isMine: false, isFlag: false, isRevealed: false, minesAround: 0}
 			}
 		}
 	}
-}
-
-func (m *Minesweeper) UpdateCellState(position Coordinates, state CellState) {
-	m.Board[position] = state
 }
 
 func generateMinePositions(dimension GridDimensions, numberOfMines int) map[Coordinates]bool {
@@ -127,12 +99,10 @@ func (g *Game) Update() error {
 	x, y := ebiten.CursorPosition()
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		position := Coordinates{x / cellSize, y / cellSize}
-		cellState := g.Minesweeper.Board[position]
+		cellState := g.Board[position]
 		fmt.Println(cellState)
 		cellState.isRevealed = true
-		g.Minesweeper.UpdateCellState(
-			position, cellState)
-
+		g.Board[position] = cellState
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
 	}
@@ -140,22 +110,24 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) RenderBoard(screen *ebiten.Image) {
-	for boardPosition, cellState := range g.Minesweeper.Board {
+	for boardPosition, cellState := range g.Board {
 		var baseSpriteCell *ebiten.Image
 		opts := &ebiten.DrawImageOptions{}
 
-		tx := float64(boardPosition.X * g.Sprite.Size)
-		ty := float64(boardPosition.Y * g.Sprite.Size)
+		tx := float64(boardPosition.X * cellSize)
+		ty := float64(boardPosition.Y * cellSize)
 
 		opts.GeoM.Translate(tx, ty)
 
-		if !cellState.isRevealed {
-			baseSpriteCell = g.Sprite.Image.SubImage(image.Rect(0, 0, g.Sprite.Size, g.Sprite.Size)).(*ebiten.Image)
-		} else if cellState.isMine && cellState.isRevealed {
-			baseSpriteCell = g.Sprite.Image.SubImage(image.Rect(cellSize*6, 0, g.Sprite.Size*7, g.Sprite.Size)).(*ebiten.Image)
-		} else if !cellState.isMine && cellState.minesAround == 0 && cellState.isRevealed {
-			baseSpriteCell = g.Sprite.Image.SubImage(image.Rect(cellSize, 0, g.Sprite.Size*2, g.Sprite.Size)).(*ebiten.Image)
+		switch {
+		case !cellState.isRevealed:
+			baseSpriteCell = g.Sprite.Image["hidden"]
+		case cellState.isMine:
+			baseSpriteCell = g.Sprite.Image["mine"]
+		default:
+			baseSpriteCell = g.Sprite.Image["empty"]
 		}
+
 		screen.DrawImage(baseSpriteCell, opts)
 
 	}
@@ -166,29 +138,39 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
-	return 320, 240
+	return 720, 480
 }
 
 func LoadSprite() (Sprite, error) {
-	spriteImage, _, err := ebitenutil.NewImageFromFile("assets/sprites/board.png")
-	sprite := Sprite{Image: spriteImage, Size: cellSize}
+	spriteSheet, _, err := ebitenutil.NewImageFromFile("assets/sprites/board.png")
 
-	return sprite, err
+	images := map[string]*ebiten.Image{
+		"hidden": spriteSheet.SubImage(image.Rect(0, 0, cellSize, cellSize)).(*ebiten.Image),
+		"flag":   spriteSheet.SubImage(image.Rect(cellSize*2, 0, cellSize*3, cellSize)).(*ebiten.Image),
+		"mine":   spriteSheet.SubImage(image.Rect(cellSize*6, 0, cellSize*7, cellSize)).(*ebiten.Image),
+		"empty":  spriteSheet.SubImage(image.Rect(cellSize, 0, cellSize*2, cellSize)).(*ebiten.Image),
+	}
+
+	return Sprite{Image: images}, err
 }
 
 func main() {
-	ebiten.SetWindowSize(640, 480)
+	ebiten.SetWindowSize(1080, 720)
 	ebiten.SetWindowTitle("Hello, MineSweeper go!")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	game := Minesweeper{}
+	sprite, err := LoadSprite()
+	game := Game{
+		Dificulty: medium,
+		Board:     make(map[Coordinates]CellState),
+		Sprite:    sprite,
+	}
 	game.createBoard(medium)
 
-	sprite, err := LoadSprite()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := ebiten.RunGame(&Game{Minesweeper: &game, Sprite: sprite}); err != nil {
+	if err := ebiten.RunGame(&game); err != nil {
 		log.Fatal(err)
 	}
 }
