@@ -59,10 +59,11 @@ type Coordinates struct {
 // example: if isRevealed is true, isFlag should be false
 // example: if isFlag is true, isRevealed should be false
 type CellState struct {
-	minesAround int
-	isMine      bool
-	isFlag      bool
-	isRevealed  bool
+	minesAround   int
+	isMine        bool
+	isFlag        bool
+	isRevealed    bool
+	isMineClicked bool
 }
 
 type Sprite struct {
@@ -115,6 +116,8 @@ func (g *Game) RevealCellChain(position Coordinates) {
 	}
 
 	if cellState.isMine {
+		cellState.isMineClicked = true
+		g.Board[position] = cellState
 		g.GameOver()
 		return
 	}
@@ -150,7 +153,7 @@ func (g *Game) CalculateMinesAround(position Coordinates) {
 			neighborPos := Coordinates{X: position.X + neighbor.X, Y: position.Y + neighbor.Y}
 
 			if g.isOutOfBounds(neighborPos) {
-				return
+				continue
 			}
 
 			if _, exists := g.Board[neighborPos]; !exists {
@@ -207,10 +210,6 @@ func (g *Game) Update() error {
 			return nil
 		}
 
-		// if !cellState.isFlag {
-		// 	cellState.isRevealed = true
-		// 	g.Board[position] = cellState
-		// }
 		g.RevealCellChain(position)
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
@@ -245,6 +244,8 @@ func (g *Game) RenderBoard(screen *ebiten.Image) {
 			baseSpriteCell = g.Sprite.Image["flag"]
 		case !cellState.isRevealed:
 			baseSpriteCell = g.Sprite.Image["hidden"]
+		case cellState.isMineClicked:
+			baseSpriteCell = g.Sprite.Image["mineClicked"]
 		case cellState.isMine:
 			baseSpriteCell = g.Sprite.Image["mine"]
 		case cellState.minesAround > 0:
@@ -270,11 +271,11 @@ func LoadSprite() (Sprite, error) {
 	spriteSheet, _, err := ebitenutil.NewImageFromFile("assets/sprites/board.png")
 
 	images := map[string]*ebiten.Image{
-		"hidden":   spriteSheet.SubImage(image.Rect(0, 0, cellSize, cellSize)).(*ebiten.Image),
-		"flag":     spriteSheet.SubImage(image.Rect(cellSize*2, 0, cellSize*3, cellSize)).(*ebiten.Image),
-		"mine":     spriteSheet.SubImage(image.Rect(cellSize*6, 0, cellSize*7, cellSize)).(*ebiten.Image),
-		"mineOver": spriteSheet.SubImage(image.Rect(cellSize*5, 0, cellSize*6, cellSize)).(*ebiten.Image),
-		"empty":    spriteSheet.SubImage(image.Rect(cellSize, 0, cellSize*2, cellSize)).(*ebiten.Image),
+		"hidden":      spriteSheet.SubImage(image.Rect(0, 0, cellSize, cellSize)).(*ebiten.Image),
+		"flag":        spriteSheet.SubImage(image.Rect(cellSize*2, 0, cellSize*3, cellSize)).(*ebiten.Image),
+		"mineClicked": spriteSheet.SubImage(image.Rect(cellSize*6, 0, cellSize*7, cellSize)).(*ebiten.Image),
+		"mine":        spriteSheet.SubImage(image.Rect(cellSize*5, 0, cellSize*6, cellSize)).(*ebiten.Image),
+		"empty":       spriteSheet.SubImage(image.Rect(cellSize, 0, cellSize*2, cellSize)).(*ebiten.Image),
 	}
 
 	for spriteNumb := 0; spriteNumb < 8; spriteNumb++ {
