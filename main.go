@@ -47,12 +47,17 @@ type Game struct {
 	MinePositions map[Coordinates]bool
 	Sprite        Sprite
 	Dificulty     GameDifficulty
+	EndGame       bool
 }
 
 type Coordinates struct {
 	X, Y int
 }
 
+// TODO: keep CellState invariants (keep the struct consistent)
+// example: if isMine is true, minesAround should be 0
+// example: if isRevealed is true, isFlag should be false
+// example: if isFlag is true, isRevealed should be false
 type CellState struct {
 	minesAround int
 	isMine      bool
@@ -77,12 +82,60 @@ type GameDifficulty struct {
 func (g *Game) createBoard() {
 	grid := g.Dificulty.GridDimensions
 
-	_ = g.GenerateMinePositions()
 	for x := 0; x < grid.Cols; x++ {
 		for y := 0; y < grid.Rows; y++ {
 			pos := Coordinates{X: x, Y: y}
 			g.CalculateMinesAround(pos)
 
+		}
+	}
+}
+
+func (g *Game) GameOver() {
+	g.EndGame = true
+	for minesPos := range g.MinePositions {
+
+		cellState := g.Board[minesPos]
+		if cellState.isMine && !cellState.isFlag && !cellState.isRevealed {
+			cellState.isRevealed = true
+			g.Board[minesPos] = cellState
+		}
+	}
+}
+
+func (g *Game) RevealCellChain(position Coordinates) {
+	if g.isOutOfBounds(position) {
+		return
+	}
+
+	cellState := g.Board[position]
+
+	if cellState.isRevealed || cellState.isFlag {
+		return
+	}
+
+	if cellState.isMine {
+		g.GameOver()
+		return
+	}
+
+	if cellState.minesAround > 0 {
+		cellState.isRevealed = true
+		g.Board[position] = cellState
+		return
+	}
+
+	for _, neighbor := range PositionNeighbors {
+		neighborPos := Coordinates{X: position.X + neighbor.X, Y: position.Y + neighbor.Y}
+
+		if g.isOutOfBounds(neighborPos) {
+			continue
+		}
+
+		cellState.isRevealed = true
+		g.Board[position] = cellState
+		if cellState.minesAround == 0 && !g.Board[neighborPos].isMine {
+			g.RevealCellChain(neighborPos)
 		}
 	}
 }
@@ -142,6 +195,9 @@ func (g *Game) isOutOfBounds(position Coordinates) bool {
 }
 
 func (g *Game) Update() error {
+	if g.EndGame {
+		return nil
+	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		// TODO: Refactor this
 		x, y := ebiten.CursorPosition()
@@ -151,12 +207,11 @@ func (g *Game) Update() error {
 			return nil
 		}
 
-		cellState := g.Board[position]
-
-		if !cellState.isFlag {
-			cellState.isRevealed = true
-			g.Board[position] = cellState
-		}
+		// if !cellState.isFlag {
+		// 	cellState.isRevealed = true
+		// 	g.Board[position] = cellState
+		// }
+		g.RevealCellChain(position)
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
 		// TODO: Refactor this
@@ -168,7 +223,7 @@ func (g *Game) Update() error {
 		}
 
 		cellState := g.Board[position]
-		cellState.isFlag = true
+		cellState.isFlag = !cellState.isFlag
 		g.Board[position] = cellState
 
 	}
@@ -215,10 +270,11 @@ func LoadSprite() (Sprite, error) {
 	spriteSheet, _, err := ebitenutil.NewImageFromFile("assets/sprites/board.png")
 
 	images := map[string]*ebiten.Image{
-		"hidden": spriteSheet.SubImage(image.Rect(0, 0, cellSize, cellSize)).(*ebiten.Image),
-		"flag":   spriteSheet.SubImage(image.Rect(cellSize*2, 0, cellSize*3, cellSize)).(*ebiten.Image),
-		"mine":   spriteSheet.SubImage(image.Rect(cellSize*6, 0, cellSize*7, cellSize)).(*ebiten.Image),
-		"empty":  spriteSheet.SubImage(image.Rect(cellSize, 0, cellSize*2, cellSize)).(*ebiten.Image),
+		"hidden":   spriteSheet.SubImage(image.Rect(0, 0, cellSize, cellSize)).(*ebiten.Image),
+		"flag":     spriteSheet.SubImage(image.Rect(cellSize*2, 0, cellSize*3, cellSize)).(*ebiten.Image),
+		"mine":     spriteSheet.SubImage(image.Rect(cellSize*6, 0, cellSize*7, cellSize)).(*ebiten.Image),
+		"mineOver": spriteSheet.SubImage(image.Rect(cellSize*5, 0, cellSize*6, cellSize)).(*ebiten.Image),
+		"empty":    spriteSheet.SubImage(image.Rect(cellSize, 0, cellSize*2, cellSize)).(*ebiten.Image),
 	}
 
 	for spriteNumb := 0; spriteNumb < 8; spriteNumb++ {
@@ -228,20 +284,33 @@ func LoadSprite() (Sprite, error) {
 	return Sprite{Image: images}, err
 }
 
+// TODO: Create mines in board using random normal distribution
+
+func InitGame() (Game, error) {
+	sprite, err := LoadSprite()
+	initialMinePositions := make(map[Coordinates]bool)
+	initialBoard := make(map[Coordinates]CellState)
+
+	game := Game{
+		Dificulty:     medium,
+		Board:         initialBoard,
+		Sprite:        sprite,
+		EndGame:       false,
+		MinePositions: initialMinePositions,
+	}
+
+	game.GenerateMinePositions()
+	game.createBoard()
+
+	return game, err
+}
+
 func main() {
 	ebiten.SetWindowSize(1080, 720)
 	ebiten.SetWindowTitle("Hello, MineSweeper go!")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	sprite, err := LoadSprite()
-	minePositions := make(map[Coordinates]bool)
-	game := Game{
-		Dificulty:     medium,
-		Board:         make(map[Coordinates]CellState),
-		Sprite:        sprite,
-		MinePositions: minePositions,
-	}
-	game.createBoard()
 
+	game, err := InitGame()
 	if err != nil {
 		log.Fatal(err)
 	}
