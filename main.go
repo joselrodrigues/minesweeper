@@ -1,31 +1,40 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	_ "image/png"
+	"io"
 	"log"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/audio"
+	"github.com/hajimehoshi/ebiten/v2/audio/mp3"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 const (
-	cellSize = 16
+	cellSize   = 16
+	sampleRate = 48000
 )
 
-var PositionNeighbors = []Coordinates{
-	{X: -1, Y: -1},
-	{X: -1, Y: 0},
-	{X: -1, Y: 1},
-	{X: 0, Y: -1},
-	{X: 0, Y: 1},
-	{X: 1, Y: -1},
-	{X: 1, Y: 0},
-	{X: 1, Y: 1},
-}
+var (
+	audioContext      = audio.NewContext(sampleRate)
+	PositionNeighbors = []Coordinates{
+		{X: -1, Y: -1},
+		{X: -1, Y: 0},
+		{X: -1, Y: 1},
+		{X: 0, Y: -1},
+		{X: 0, Y: 1},
+		{X: 1, Y: -1},
+		{X: 1, Y: 0},
+		{X: 1, Y: 1},
+	}
+)
 
 var easy = GameDifficulty{
 	GridDimensions: GridDimensions{Cols: 9, Rows: 9},
@@ -147,7 +156,7 @@ func (g *Game) CalculateMinesAround(position Coordinates) {
 	mines := g.MinePositions
 
 	if mines[position] {
-		g.Board[position] = CellState{isMine: true, isFlag: false, isRevealed: false, minesAround: 0}
+		g.Board[position] = CellState{isMine: true, isFlag: false, isRevealed: true, minesAround: 0}
 
 		for _, neighbor := range PositionNeighbors {
 			neighborPos := Coordinates{X: position.X + neighbor.X, Y: position.Y + neighbor.Y}
@@ -210,6 +219,11 @@ func (g *Game) Update() error {
 			return nil
 		}
 
+		cellState := g.Board[position]
+		if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
+			PlayAudio()
+		}
+
 		g.RevealCellChain(position)
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
@@ -227,6 +241,50 @@ func (g *Game) Update() error {
 
 	}
 	return nil
+}
+
+// TODO: should pass the audio file as parameter
+
+func PlayAudio() {
+	file, err := os.Open("./assets/sounds/totalmenchi.mp3")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	file.Close()
+
+	reader := bytes.NewReader(data)
+
+	d, err := mp3.DecodeWithSampleRate(sampleRate, reader)
+	if err != nil {
+		log.Fatalf("Error decoding MP3: %v", err)
+	}
+
+	player, err := audioContext.NewPlayer(d)
+	if err != nil {
+		log.Fatalf("Error creating audio player: %v", err)
+	}
+
+	done := make(chan bool)
+
+	go func() {
+		player.Play()
+
+		for player.IsPlaying() {
+		}
+
+		done <- true
+	}()
+
+	go func() {
+		<-done
+		file.Close()
+	}()
 }
 
 func (g *Game) RenderBoard(screen *ebiten.Image) {
