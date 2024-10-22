@@ -256,8 +256,6 @@ func PlayAudio() {
 		log.Fatal(err)
 	}
 
-	file.Close()
-
 	reader := bytes.NewReader(data)
 
 	d, err := mp3.DecodeWithSampleRate(sampleRate, reader)
