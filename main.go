@@ -1,54 +1,81 @@
 package main
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/png"
-	"io"
 	"log"
 	"math/rand"
-	"os"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/audio"
-	"github.com/hajimehoshi/ebiten/v2/audio/mp3"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 const (
-	cellSize   = 16
-	sampleRate = 48000
+	cellSize            = 16
+	sampleRate          = 48000
+	defaultWindowWidth  = 1080
+	defaultWindowHeight = 720
+	spreadFactor        = 4.0 // Mayor número = más dispersión
+	centerBias          = 0.5 // 0.5 = centrado, ajustar para desplazar el centro
 )
 
 var (
-	audioContext      = audio.NewContext(sampleRate)
-	PositionNeighbors = []Coordinates{
-		{X: -1, Y: -1},
-		{X: -1, Y: 0},
-		{X: -1, Y: 1},
-		{X: 0, Y: -1},
-		{X: 0, Y: 1},
-		{X: 1, Y: -1},
-		{X: 1, Y: 0},
-		{X: 1, Y: 1},
-	}
+	ErrOutOfBounds       = errors.New("position is out of bounds")
+	ErrInvalidDifficulty = errors.New("invalid game difficulty")
+	ErrAssetNotFound     = errors.New("game asset not found")
 )
 
-var easy = GameDifficulty{
-	GridDimensions: GridDimensions{Cols: 9, Rows: 9},
-	NumberOfMines:  10,
+type GameState int
+
+const (
+	Playing GameState = iota
+	Won
+	Lost
+)
+
+type DificultyLevel int
+
+const (
+	Easy DificultyLevel = iota
+	Medium
+	Hard
+)
+
+var difficultyLevels = map[DificultyLevel]GameDifficulty{
+	Easy: {
+		GridDimensions: GridDimensions{Cols: 9, Rows: 9},
+		NumberOfMines:  10,
+	},
+
+	Medium: {
+		GridDimensions: GridDimensions{Cols: 16, Rows: 16},
+		NumberOfMines:  40,
+	},
+
+	Hard: {
+		GridDimensions: GridDimensions{Cols: 30, Rows: 16},
+		NumberOfMines:  99,
+	},
 }
 
-var medium = GameDifficulty{
-	GridDimensions: GridDimensions{Cols: 16, Rows: 16},
-	NumberOfMines:  40,
+type AudioManager struct {
+	context *audio.Context
+	sounds  map[string]*audio.Player
 }
 
-var hard = GameDifficulty{
-	GridDimensions: GridDimensions{Cols: 30, Rows: 16},
-	NumberOfMines:  99,
+var PositionNeighbors = []Coordinates{
+	{X: -1, Y: -1},
+	{X: -1, Y: 0},
+	{X: -1, Y: 1},
+	{X: 0, Y: -1},
+	{X: 0, Y: 1},
+	{X: 1, Y: -1},
+	{X: 1, Y: 0},
+	{X: 1, Y: 1},
 }
 
 type Game struct {
@@ -56,7 +83,7 @@ type Game struct {
 	MinePositions map[Coordinates]bool
 	Sprite        Sprite
 	Dificulty     GameDifficulty
-	EndGame       bool
+	State         GameState
 }
 
 type Coordinates struct {
@@ -89,6 +116,39 @@ type GameDifficulty struct {
 	GridDimensions GridDimensions
 }
 
+func NewGame(level DificultyLevel) (*Game, error) {
+	difficulty, ok := difficultyLevels[level]
+	if !ok {
+		return nil, ErrInvalidDifficulty
+	}
+
+	// TODO: change name of the function to NewSprite
+	sprite, err := LoadSprite()
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: audio manager is mising
+	game := &Game{
+		Board:         make(map[Coordinates]CellState),
+		MinePositions: make(map[Coordinates]bool),
+		Dificulty:     difficulty,
+		State:         Playing,
+		Sprite:        sprite,
+	}
+
+	// TODO: mabye shoudl handle error
+	game.InitializeBoard()
+
+	return game, nil
+}
+
+func (g *Game) InitializeBoard() {
+	// TODO: Implement Error handling
+	g.GenerateMinePositions()
+	g.createBoard()
+}
+
 func (g *Game) createBoard() {
 	grid := g.Dificulty.GridDimensions
 
@@ -102,7 +162,7 @@ func (g *Game) createBoard() {
 }
 
 func (g *Game) GameOver() {
-	g.EndGame = true
+	g.State = Lost
 	for minesPos := range g.MinePositions {
 
 		cellState := g.Board[minesPos]
@@ -183,23 +243,25 @@ func (g *Game) CalculateMinesAround(position Coordinates) {
 	}
 }
 
-func (g *Game) GenerateMinePositions() map[Coordinates]bool {
+func (g *Game) GenerateMinePositions() {
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
+	// TODO: maybe is not necessary to store this in a variable
 	grid := g.Dificulty.GridDimensions
 	numberOfMines := g.Dificulty.NumberOfMines
 	mines := g.MinePositions
 
 	for len(mines) < numberOfMines {
-		x := rnd.Intn(grid.Cols)
-		y := rnd.Intn(grid.Rows)
+		x := int(rnd.NormFloat64()*float64(grid.Cols)/spreadFactor +
+			float64(grid.Cols)*centerBias)
+		y := int(rnd.NormFloat64()*float64(grid.Rows)/spreadFactor +
+			float64(grid.Rows)*centerBias)
 		pos := Coordinates{X: x, Y: y}
 
-		if _, exists := mines[pos]; !exists {
+		if !g.isOutOfBounds(pos) && !mines[pos] {
 			mines[pos] = true
 		}
 	}
-	return mines
 }
 
 func (g *Game) isOutOfBounds(position Coordinates) bool {
@@ -207,7 +269,7 @@ func (g *Game) isOutOfBounds(position Coordinates) bool {
 }
 
 func (g *Game) Update() error {
-	if g.EndGame {
+	if g.State != Playing {
 		return nil
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
@@ -221,7 +283,7 @@ func (g *Game) Update() error {
 
 		cellState := g.Board[position]
 		if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
-			PlayAudio()
+			// PlayAudio()
 		}
 
 		g.RevealCellChain(position)
@@ -243,47 +305,56 @@ func (g *Game) Update() error {
 	return nil
 }
 
+func (g *Game) CheckVictory() bool {
+	for _, cellState := range g.Board {
+		if (cellState.isMine && cellState.isRevealed) || (!cellState.isMine && !cellState.isRevealed) {
+			return false
+		}
+	}
+	return true
+}
+
 // TODO: should pass the audio file as parameter
 
-func PlayAudio() {
-	file, err := os.Open("./assets/sounds/totalmenchi.mp3")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	reader := bytes.NewReader(data)
-
-	d, err := mp3.DecodeWithSampleRate(sampleRate, reader)
-	if err != nil {
-		log.Fatalf("Error decoding MP3: %v", err)
-	}
-
-	player, err := audioContext.NewPlayer(d)
-	if err != nil {
-		log.Fatalf("Error creating audio player: %v", err)
-	}
-
-	done := make(chan bool)
-
-	go func() {
-		player.Play()
-
-		for player.IsPlaying() {
-		}
-
-		done <- true
-	}()
-
-	go func() {
-		<-done
-		file.Close()
-	}()
-}
+// func PlayAudio() {
+// 	file, err := os.Open("./assets/sounds/totalmenchi.mp3")
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+//
+// 	data, err := io.ReadAll(file)
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+//
+// 	reader := bytes.NewReader(data)
+//
+// 	d, err := mp3.DecodeWithSampleRate(sampleRate, reader)
+// 	if err != nil {
+// 		log.Fatalf("Error decoding MP3: %v", err)
+// 	}
+//
+// 	player, err := audioContext.NewPlayer(d)
+// 	if err != nil {
+// 		log.Fatalf("Error creating audio player: %v", err)
+// 	}
+//
+// 	done := make(chan bool)
+//
+// 	go func() {
+// 		player.Play()
+//
+// 		for player.IsPlaying() {
+// 		}
+//
+// 		done <- true
+// 	}()
+//
+// 	go func() {
+// 		<-done
+// 		file.Close()
+// 	}()
+// }
 
 func (g *Game) RenderBoard(screen *ebiten.Image) {
 	for boardPosition, cellState := range g.Board {
@@ -343,36 +414,17 @@ func LoadSprite() (Sprite, error) {
 
 // TODO: Create mines in board using random normal distribution
 
-func InitGame() (Game, error) {
-	sprite, err := LoadSprite()
-	initialMinePositions := make(map[Coordinates]bool)
-	initialBoard := make(map[Coordinates]CellState)
-
-	game := Game{
-		Dificulty:     medium,
-		Board:         initialBoard,
-		Sprite:        sprite,
-		EndGame:       false,
-		MinePositions: initialMinePositions,
-	}
-
-	game.GenerateMinePositions()
-	game.createBoard()
-
-	return game, err
-}
-
 func main() {
-	ebiten.SetWindowSize(1080, 720)
-	ebiten.SetWindowTitle("Hello, MineSweeper go!")
+	ebiten.SetWindowSize(defaultWindowWidth, defaultWindowHeight)
+	ebiten.SetWindowTitle("MineSweeper")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 
-	game, err := InitGame()
+	game, err := NewGame(Medium)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := ebiten.RunGame(&game); err != nil {
+	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
 	}
 }
