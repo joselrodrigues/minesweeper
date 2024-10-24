@@ -216,7 +216,7 @@ func (g *Game) CalculateMinesAround(position Coordinates) {
 	mines := g.MinePositions
 
 	if mines[position] {
-		g.Board[position] = CellState{isMine: true, isFlag: false, isRevealed: true, minesAround: 0}
+		g.Board[position] = CellState{isMine: true, isFlag: true, isRevealed: false, minesAround: 0}
 
 		for _, neighbor := range PositionNeighbors {
 			neighborPos := Coordinates{X: position.X + neighbor.X, Y: position.Y + neighbor.Y}
@@ -287,6 +287,7 @@ func (g *Game) Update() error {
 		}
 
 		g.RevealCellChain(position)
+		g.CheckVictory()
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
 		// TODO: Refactor this
@@ -306,11 +307,22 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) CheckVictory() bool {
+	if g.State != Playing {
+		return false
+	}
 	for _, cellState := range g.Board {
-		if (cellState.isMine && cellState.isRevealed) || (!cellState.isMine && !cellState.isRevealed) {
-			return false
+		if cellState.isMine {
+			if !cellState.isFlag {
+				return false
+			}
+		} else {
+			if !cellState.isRevealed {
+				return false
+			}
 		}
 	}
+	g.State = Won
+	// TODO: should collect some statistics
 	return true
 }
 
