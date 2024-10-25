@@ -456,8 +456,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.RenderBoard(screen)
 }
 
+func (g *Game) CalculateScreenDimensions() (width, height int) {
+	width = g.Difficulty.GridDimensions.Rows * cellSize
+	height = g.Difficulty.GridDimensions.Cols * cellSize
+	return width, height
+}
+
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
-	return g.Difficulty.GridDimensions.Rows * cellSize, g.Difficulty.GridDimensions.Cols * cellSize
+	return g.CalculateScreenDimensions()
 }
 
 func LoadSprite() (Sprite, error) {
