@@ -422,48 +422,6 @@ func (g *Game) CheckVictory() bool {
 	return true
 }
 
-// TODO: should pass the audio file as parameter
-
-// func PlayAudio() {
-// 	file, err := os.Open("./assets/sounds/totalmenchi.mp3")
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-//
-// 	data, err := io.ReadAll(file)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-//
-// 	reader := bytes.NewReader(data)
-//
-// 	d, err := mp3.DecodeWithSampleRate(sampleRate, reader)
-// 	if err != nil {
-// 		log.Fatalf("Error decoding MP3: %v", err)
-// 	}
-//
-// 	player, err := audioContext.NewPlayer(d)
-// 	if err != nil {
-// 		log.Fatalf("Error creating audio player: %v", err)
-// 	}
-//
-// 	done := make(chan bool)
-//
-// 	go func() {
-// 		player.Play()
-//
-// 		for player.IsPlaying() {
-// 		}
-//
-// 		done <- true
-// 	}()
-//
-// 	go func() {
-// 		<-done
-// 		file.Close()
-// 	}()
-// }
-
 func (g *Game) RenderBoard(screen *ebiten.Image) {
 	for boardPosition, cellState := range g.Board {
 		var baseSpriteCell *ebiten.Image
