@@ -85,7 +85,7 @@ var PositionNeighbors = []Coordinates{
 type Game struct {
 	Board         map[Coordinates]CellState
 	MinePositions map[Coordinates]bool
-	AudioManager  AudioManager
+	AudioManager  *AudioManager
 	Sprite        Sprite
 	Difficulty    GameDifficulty
 	State         GameState
@@ -189,7 +189,7 @@ func NewGame(level DificultyLevel) (*Game, error) {
 		Board:         make(map[Coordinates]CellState),
 		MinePositions: make(map[Coordinates]bool),
 		Difficulty:    difficulty,
-		AudioManager:  *audioManager,
+		AudioManager:  audioManager,
 		State:         Playing,
 		Sprite:        sprite,
 	}
@@ -238,7 +238,18 @@ func (g *Game) HandleMineClicked(pos Coordinates) {
 }
 
 // TODO: Implement Restart
-func (g *Game) Restart() {}
+func (g *Game) Restart() {
+	g.Board = make(map[Coordinates]CellState)
+	g.MinePositions = make(map[Coordinates]bool)
+	g.State = Playing
+
+	g.InitializeBoard()
+
+	for _, player := range g.AudioManager.sounds {
+		player.Rewind()
+		player.Pause()
+	}
+}
 
 func (g *Game) RevealCell(pos Coordinates) error {
 	// TODO: maybe this is no necessary here because
