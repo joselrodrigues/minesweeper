@@ -434,7 +434,6 @@ func (g *Game) Update() error {
 		}
 
 		if g.FirstClick == nil {
-			fmt.Println("First Click")
 			g.FirstClick = &pos
 			g.InitializeBoardState()
 		}
