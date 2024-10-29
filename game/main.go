@@ -19,6 +19,8 @@ import (
 )
 
 const (
+	boardOffsetX        = 12
+	boardOffsetY        = 55
 	cellSize            = 16
 	sampleRate          = 48000
 	defaultWindowWidth  = 1080
@@ -82,10 +84,19 @@ var PositionNeighbors = []Coordinates{
 	{X: 1, Y: 1},
 }
 
+type GameStatistics struct {
+	StartTime      time.Time
+	TimeElapsed    time.Duration
+	Clicks         int
+	FlagsAvailable int
+}
+
 type Game struct {
 	Board         map[Coordinates]CellState
 	MinePositions map[Coordinates]bool
 	AudioManager  *AudioManager
+	Statistics    *GameStatistics
+	FirstClick    *Coordinates
 	Sprite        Sprite
 	Difficulty    GameDifficulty
 	State         GameState
@@ -105,6 +116,11 @@ type CellState struct {
 	isFlag        bool
 	isRevealed    bool
 	isMineClicked bool
+}
+
+type ClickEvent struct {
+	Position Coordinates
+	IsFirst  bool
 }
 
 type Sprite struct {
@@ -188,32 +204,33 @@ func NewGame(level DificultyLevel) (*Game, error) {
 	game := &Game{
 		Board:         make(map[Coordinates]CellState),
 		MinePositions: make(map[Coordinates]bool),
+		Statistics:    &GameStatistics{StartTime: time.Now(), FlagsAvailable: difficulty.NumberOfMines},
 		Difficulty:    difficulty,
 		AudioManager:  audioManager,
 		State:         Playing,
 		Sprite:        sprite,
+		FirstClick:    nil,
 	}
 
 	// TODO: mabye shoudl handle error
-	game.InitializeBoard()
+	game.CreateBoard()
 
 	return game, nil
 }
 
-func (g *Game) InitializeBoard() {
-	// TODO: Implement Error handling
+func (g *Game) InitializeBoardState() {
 	g.GenerateMinePositions()
-	g.createBoard()
+	for pos := range g.Board {
+		g.CalculateMinesAround(pos)
+	}
 }
 
-func (g *Game) createBoard() {
+func (g *Game) CreateBoard() {
 	grid := g.Difficulty.GridDimensions
-
 	for x := 0; x < grid.Cols; x++ {
 		for y := 0; y < grid.Rows; y++ {
 			pos := Coordinates{X: x, Y: y}
-			g.CalculateMinesAround(pos)
-
+			g.Board[pos] = CellState{isMine: false, isFlag: false, isRevealed: false, minesAround: 0}
 		}
 	}
 }
@@ -242,8 +259,10 @@ func (g *Game) Restart() {
 	g.Board = make(map[Coordinates]CellState)
 	g.MinePositions = make(map[Coordinates]bool)
 	g.State = Playing
+	g.Statistics = &GameStatistics{StartTime: time.Now(), FlagsAvailable: g.Difficulty.NumberOfMines}
+	g.FirstClick = nil
 
-	g.InitializeBoard()
+	g.CreateBoard()
 
 	for _, player := range g.AudioManager.sounds {
 		player.Rewind()
@@ -322,7 +341,7 @@ func (g *Game) CalculateMinesAround(position Coordinates) {
 	mines := g.MinePositions
 
 	if mines[position] {
-		g.Board[position] = CellState{isMine: true, isFlag: true, isRevealed: false, minesAround: 0}
+		g.Board[position] = CellState{isMine: true, isFlag: false, isRevealed: false, minesAround: 0}
 
 		for _, neighbor := range PositionNeighbors {
 			neighborPos := Coordinates{X: position.X + neighbor.X, Y: position.Y + neighbor.Y}
@@ -363,8 +382,8 @@ func (g *Game) GenerateMinePositions() {
 		y := int(rnd.NormFloat64()*float64(grid.Rows)/spreadFactor +
 			float64(grid.Rows)*centerBias)
 		pos := Coordinates{X: x, Y: y}
-
-		if !g.isOutOfBounds(pos) && !mines[pos] {
+		isNotFirstClick := g.FirstClick == nil || pos != *g.FirstClick
+		if !g.isOutOfBounds(pos) && !mines[pos] && isNotFirstClick {
 			mines[pos] = true
 		}
 	}
@@ -372,45 +391,93 @@ func (g *Game) GenerateMinePositions() {
 
 // TODO: maybe should be call ValidatePosition
 func (g *Game) isOutOfBounds(position Coordinates) bool {
-	return position.X < 0 || position.Y < 0 || position.X >= g.Difficulty.GridDimensions.Rows || position.Y >= g.Difficulty.GridDimensions.Cols
+	return position.X < 0 || position.Y < 0 || position.X >= g.Difficulty.GridDimensions.Cols || position.Y >= g.Difficulty.GridDimensions.Rows
+}
+
+func (g *Game) ValidBoardPosition(cursorX, cursorY int) (Coordinates, bool) {
+	cellX := (cursorX - boardOffsetX) / cellSize
+	cellY := (cursorY - boardOffsetY) / cellSize
+	pos := Coordinates{X: cellX, Y: cellY}
+
+	cellRect := image.Rect(
+		boardOffsetX+cellX*cellSize,
+		boardOffsetY+cellY*cellSize,
+		boardOffsetX+(cellX+1)*cellSize,
+		boardOffsetY+(cellY+1)*cellSize,
+	)
+
+	if !image.Pt(cursorX, cursorY).In(cellRect) || g.isOutOfBounds(pos) {
+		return Coordinates{}, false
+	}
+
+	return pos, true
+}
+
+func (g *Game) ScreenToBoard(screenX, screenY int) Coordinates {
+	boardX := (screenX - boardOffsetX) / cellSize
+	boardY := (screenY - boardOffsetY) / cellSize
+	return Coordinates{X: boardX, Y: boardY}
 }
 
 func (g *Game) Update() error {
 	if g.State != Playing {
 		return nil
 	}
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		// TODO: Refactor this
-		x, y := ebiten.CursorPosition()
-		position := Coordinates{x / cellSize, y / cellSize}
 
-		if g.isOutOfBounds(position) {
+	x, y := ebiten.CursorPosition()
+
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		pos, ok := g.ValidBoardPosition(x, y)
+
+		if !ok {
 			return nil
 		}
 
-		cellState := g.Board[position]
+		if g.FirstClick == nil {
+			fmt.Println("First Click")
+			g.FirstClick = &pos
+			g.InitializeBoardState()
+		}
+
+		cellState := g.Board[pos]
 		if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
 			g.AudioManager.PlaySound("totalmenchi")
 		}
 
-		g.RevealCell(position)
+		g.RevealCell(pos)
 		g.CheckVictory()
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
-		// TODO: Refactor this
-		x, y := ebiten.CursorPosition()
-		position := Coordinates{x / cellSize, y / cellSize}
 
-		if g.isOutOfBounds(position) {
+		position, ok := g.ValidBoardPosition(x, y)
+
+		if !ok {
 			return nil
 		}
-
-		cellState := g.Board[position]
-		cellState.isFlag = !cellState.isFlag
-		g.Board[position] = cellState
+		g.ToggleFlag(position)
 
 	}
 	return nil
+}
+
+func (g *Game) ToggleFlag(pos Coordinates) {
+	cellState := g.Board[pos]
+	if cellState.isRevealed {
+		return
+	}
+
+	if !cellState.isFlag && g.Statistics.FlagsAvailable == 0 {
+		return
+	}
+
+	cellState.isFlag = !cellState.isFlag
+	g.Board[pos] = cellState
+
+	if cellState.isFlag {
+		g.Statistics.FlagsAvailable--
+	} else {
+		g.Statistics.FlagsAvailable++
+	}
 }
 
 func (g *Game) CheckVictory() bool {
@@ -433,15 +500,24 @@ func (g *Game) CheckVictory() bool {
 	return true
 }
 
+func (g *Game) BoardToScreen(boardPos Coordinates) (float64, float64) {
+	// X: borde izquierdo + (posición * tamaño de celda)
+	screenX := float64(boardOffsetX + (boardPos.X * cellSize))
+
+	// Y: borde superior + (posición * tamaño de celda)
+	screenY := float64(boardOffsetY + (boardPos.Y * cellSize))
+
+	return screenX, screenY
+}
+
 func (g *Game) RenderBoard(screen *ebiten.Image) {
 	for boardPosition, cellState := range g.Board {
 		var baseSpriteCell *ebiten.Image
 		opts := &ebiten.DrawImageOptions{}
 
-		tx := float64(boardPosition.X * cellSize)
-		ty := float64(boardPosition.Y * cellSize)
+		screenX, screenY := g.BoardToScreen(boardPosition)
 
-		opts.GeoM.Translate(tx, ty)
+		opts.GeoM.Translate(screenX, screenY)
 
 		switch {
 		case cellState.isFlag && !cellState.isRevealed:
@@ -463,13 +539,30 @@ func (g *Game) RenderBoard(screen *ebiten.Image) {
 	}
 }
 
+func (g *Game) RenderUI(screen *ebiten.Image) {
+	baseSpriteCell := g.Sprite.Image["mineClicked"]
+	opts := &ebiten.DrawImageOptions{}
+
+	tx := float64(cellSize)
+	ty := float64(0)
+
+	opts.GeoM.Translate(tx, ty)
+
+	screen.DrawImage(baseSpriteCell, opts)
+}
+
 func (g *Game) Draw(screen *ebiten.Image) {
 	g.RenderBoard(screen)
+	// g.RenderUI(screen)
 }
 
 func (g *Game) CalculateScreenDimensions() (width, height int) {
-	width = g.Difficulty.GridDimensions.Rows * cellSize
-	height = g.Difficulty.GridDimensions.Cols * cellSize
+	// Ancho: borde izquierdo + ancho del tablero + borde derecho
+	width = boardOffsetX + (g.Difficulty.GridDimensions.Cols * cellSize) + boardOffsetX
+
+	// Alto: borde superior + alto del tablero + borde inferior
+	height = boardOffsetY + (g.Difficulty.GridDimensions.Rows * cellSize) + boardOffsetX // usamos boardOffsetX porque el borde inferior es 12
+
 	return width, height
 }
 
