@@ -35,6 +35,13 @@ var (
 	ErrAssetNotFound     = errors.New("game asset not found")
 )
 
+type MouseAction int
+
+const (
+	LeftClick MouseAction = iota
+	RightClick
+)
+
 type GameState int
 
 const (
@@ -136,6 +143,33 @@ type GridDimensions struct {
 type GameDifficulty struct {
 	NumberOfMines  int
 	GridDimensions GridDimensions
+}
+
+func (g *Game) HandleInput(Coordinates Coordinates, Action MouseAction) {
+	x, y := Coordinates.X, Coordinates.Y
+	pos, ok := g.ValidBoardPosition(x, y)
+	if !ok {
+		return
+	}
+
+	if Action == LeftClick {
+		if g.FirstClick == nil {
+			g.FirstClick = &pos
+			g.InitializeBoardState()
+		}
+
+		cellState := g.Board[pos]
+		if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
+			g.AudioManager.PlaySound("totalmenchi")
+		}
+
+		g.RevealCell(pos)
+		g.CheckVictory()
+		return
+	}
+	if Action == RightClick {
+		g.ToggleFlag(pos)
+	}
 }
 
 func NewAudioManager() (*AudioManager, error) {
@@ -433,34 +467,10 @@ func (g *Game) Update() error {
 	x, y := ebiten.CursorPosition()
 
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		pos, ok := g.ValidBoardPosition(x, y)
-
-		if !ok {
-			return nil
-		}
-
-		if g.FirstClick == nil {
-			g.FirstClick = &pos
-			g.InitializeBoardState()
-		}
-
-		cellState := g.Board[pos]
-		if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
-			g.AudioManager.PlaySound("totalmenchi")
-		}
-
-		g.RevealCell(pos)
-		g.CheckVictory()
+		g.HandleInput(Coordinates{X: x, Y: y}, LeftClick)
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
-
-		position, ok := g.ValidBoardPosition(x, y)
-
-		if !ok {
-			return nil
-		}
-		g.ToggleFlag(position)
-
+		g.HandleInput(Coordinates{X: x, Y: y}, RightClick)
 	}
 	return nil
 }
