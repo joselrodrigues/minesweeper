@@ -71,6 +71,7 @@ var difficultyLevels = map[DificultyLevel]GameDifficulty{
 type AudioManager struct {
 	context *audio.Context
 	sounds  map[string]*audio.Player
+	isMute  bool
 }
 
 var PositionNeighbors = []Coordinates{
@@ -142,6 +143,7 @@ func NewAudioManager() (*AudioManager, error) {
 	return &AudioManager{
 		context: context,
 		sounds:  make(map[string]*audio.Player),
+		isMute:  false,
 	}, nil
 }
 
@@ -174,6 +176,10 @@ func (am *AudioManager) LoadSound(name string, path string) error {
 }
 
 func (am *AudioManager) PlaySound(name string) error {
+	if am.isMute {
+		return nil
+	}
+
 	player, ok := am.sounds[name]
 	if !ok {
 		return ErrAssetNotFound
