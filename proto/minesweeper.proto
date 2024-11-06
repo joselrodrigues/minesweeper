@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package minesweeper;
+option go_package = "minesweeper/proto";
+
+service Minesweeper {
+  rpc MakeMove (Move) returns (Empty) {}
+}
+
+message Move {
+  int32 x = 1;
+  int32 y = 2;
+  int32 action = 3; 
+  }
+
+message Empty {}

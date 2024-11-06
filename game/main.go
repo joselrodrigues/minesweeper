@@ -1,15 +1,14 @@
-package main
+package game
 
 import (
 	"bytes"
+	"embed"
 	"errors"
 	"fmt"
 	"image"
 	_ "image/png"
-	"io"
-	"log"
 	"math/rand"
-	"os"
+	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -18,13 +17,16 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
+//go:embed assets/sprites/*.png assets/sounds/*.mp3
+var gameAssets embed.FS
+
 const (
-	boardOffsetX        = 12
-	boardOffsetY        = 55
-	cellSize            = 16
+	BoardOffsetX        = 12
+	BoardOffsetY        = 55
+	CellSize            = 16
 	sampleRate          = 48000
-	defaultWindowWidth  = 1080
-	defaultWindowHeight = 720
+	DefaultWindowWidth  = 1080
+	DefaultWindowHeight = 720
 	spreadFactor        = 2.0 // Mayor número = más dispersión
 	centerBias          = 0.5 // 0.5 = centrado, ajustar para desplazar el centro
 )
@@ -108,6 +110,7 @@ type Game struct {
 	Sprite        Sprite
 	Difficulty    GameDifficulty
 	State         GameState
+	mu            sync.RWMutex
 }
 
 type Coordinates struct {
@@ -145,32 +148,85 @@ type GameDifficulty struct {
 	GridDimensions GridDimensions
 }
 
-func (g *Game) HandleInput(Coordinates Coordinates, Action MouseAction) {
-	x, y := Coordinates.X, Coordinates.Y
-	pos, ok := g.ValidBoardPosition(x, y)
+// Podrías añadir constantes de error
+var (
+	ErrInvalidPosition = errors.New("invalid board position")
+	ErrInvalidAction   = errors.New("invalid action")
+)
+
+func (g *Game) HandleInput(coordinates Coordinates, action MouseAction) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	pos, ok := g.ValidBoardPosition(coordinates.X, coordinates.Y)
 	if !ok {
-		return
+		return ErrInvalidPosition
 	}
 
-	if Action == LeftClick {
-		if g.FirstClick == nil {
-			g.FirstClick = &pos
-			g.InitializeBoardState()
-		}
-
-		cellState := g.Board[pos]
-		if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
-			g.AudioManager.PlaySound("totalmenchi")
-		}
-
-		g.RevealCell(pos)
-		g.CheckVictory()
-		return
-	}
-	if Action == RightClick {
-		g.ToggleFlag(pos)
+	switch action {
+	case LeftClick:
+		return g.handleLeftClick(pos)
+	case RightClick:
+		return g.handleRightClick(pos)
+	default:
+		return ErrInvalidAction
 	}
 }
+
+func (g *Game) handleLeftClick(pos Coordinates) error {
+	if g.FirstClick == nil {
+		g.FirstClick = &pos
+		g.InitializeBoardState()
+	}
+
+	cellState := g.Board[pos]
+	if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
+		if err := g.AudioManager.PlaySound("totalmenchi"); err != nil {
+			fmt.Printf("audio error: %v", err)
+		}
+	}
+
+	if err := g.RevealCell(pos); err != nil {
+		return fmt.Errorf("reveal cell error: %w", err)
+	}
+
+	g.CheckVictory()
+	return nil
+}
+
+func (g *Game) handleRightClick(pos Coordinates) error {
+	g.ToggleFlag(pos)
+	return nil
+}
+
+// func (g *Game) HandleInput(Coordinates Coordinates, Action MouseAction) {
+// 	g.mu.RLock()
+// 	defer g.mu.RUnlock()
+// 	x, y := Coordinates.X, Coordinates.Y
+// 	pos, ok := g.ValidBoardPosition(x, y)
+// 	if !ok {
+// 		return
+// 	}
+//
+// 	if Action == LeftClick {
+// 		if g.FirstClick == nil {
+// 			g.FirstClick = &pos
+// 			g.InitializeBoardState()
+// 		}
+//
+// 		cellState := g.Board[pos]
+// 		if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
+// 			g.AudioManager.PlaySound("totalmenchi")
+// 		}
+//
+// 		g.RevealCell(pos)
+// 		g.CheckVictory()
+// 		return
+// 	}
+// 	if Action == RightClick {
+// 		g.ToggleFlag(pos)
+// 	}
+// }
 
 func NewAudioManager() (*AudioManager, error) {
 	context := audio.NewContext(sampleRate)
@@ -182,19 +238,23 @@ func NewAudioManager() (*AudioManager, error) {
 }
 
 func (am *AudioManager) LoadSound(name string, path string) error {
-	file, err := os.Open(path)
+	soundData, err := gameAssets.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to open audio file: %w", err)
+		return fmt.Errorf("failed to read sound data: %w", err)
 	}
+	// file, err := os.Open(path)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to open audio file: %w", err)
+	// }
+	//
+	// defer file.Close()
+	//
+	// data, err := io.ReadAll(file)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to read audio file: %w", err)
+	// }
 
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return fmt.Errorf("failed to read audio file: %w", err)
-	}
-
-	reader := bytes.NewReader(data)
+	reader := bytes.NewReader(soundData)
 	decoded, err := mp3.DecodeWithSampleRate(sampleRate, reader)
 	if err != nil {
 		return fmt.Errorf("failed to decode audio file: %w", err)
@@ -435,15 +495,15 @@ func (g *Game) isOutOfBounds(position Coordinates) bool {
 }
 
 func (g *Game) ValidBoardPosition(cursorX, cursorY int) (Coordinates, bool) {
-	cellX := (cursorX - boardOffsetX) / cellSize
-	cellY := (cursorY - boardOffsetY) / cellSize
+	cellX := (cursorX - BoardOffsetX) / CellSize
+	cellY := (cursorY - BoardOffsetY) / CellSize
 	pos := Coordinates{X: cellX, Y: cellY}
 
 	cellRect := image.Rect(
-		boardOffsetX+cellX*cellSize,
-		boardOffsetY+cellY*cellSize,
-		boardOffsetX+(cellX+1)*cellSize,
-		boardOffsetY+(cellY+1)*cellSize,
+		BoardOffsetX+cellX*CellSize,
+		BoardOffsetY+cellY*CellSize,
+		BoardOffsetX+(cellX+1)*CellSize,
+		BoardOffsetY+(cellY+1)*CellSize,
 	)
 
 	if !image.Pt(cursorX, cursorY).In(cellRect) || g.isOutOfBounds(pos) {
@@ -454,12 +514,15 @@ func (g *Game) ValidBoardPosition(cursorX, cursorY int) (Coordinates, bool) {
 }
 
 func (g *Game) ScreenToBoard(screenX, screenY int) Coordinates {
-	boardX := (screenX - boardOffsetX) / cellSize
-	boardY := (screenY - boardOffsetY) / cellSize
+	boardX := (screenX - BoardOffsetX) / CellSize
+	boardY := (screenY - BoardOffsetY) / CellSize
 	return Coordinates{X: boardX, Y: boardY}
 }
 
 func (g *Game) Update() error {
+	// g.mu.RLock()
+	// defer g.mu.RUnlock()
+
 	if g.State != Playing {
 		return nil
 	}
@@ -517,10 +580,10 @@ func (g *Game) CheckVictory() bool {
 
 func (g *Game) BoardToScreen(boardPos Coordinates) (float64, float64) {
 	// X: borde izquierdo + (posición * tamaño de celda)
-	screenX := float64(boardOffsetX + (boardPos.X * cellSize))
+	screenX := float64(BoardOffsetX + (boardPos.X * CellSize))
 
 	// Y: borde superior + (posición * tamaño de celda)
-	screenY := float64(boardOffsetY + (boardPos.Y * cellSize))
+	screenY := float64(BoardOffsetY + (boardPos.Y * CellSize))
 
 	return screenX, screenY
 }
@@ -558,7 +621,7 @@ func (g *Game) RenderUI(screen *ebiten.Image) {
 	baseSpriteCell := g.Sprite.Image["mineClicked"]
 	opts := &ebiten.DrawImageOptions{}
 
-	tx := float64(cellSize)
+	tx := float64(CellSize)
 	ty := float64(0)
 
 	opts.GeoM.Translate(tx, ty)
@@ -567,16 +630,18 @@ func (g *Game) RenderUI(screen *ebiten.Image) {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
 	g.RenderBoard(screen)
 	// g.RenderUI(screen)
 }
 
 func (g *Game) CalculateScreenDimensions() (width, height int) {
 	// Ancho: borde izquierdo + ancho del tablero + borde derecho
-	width = boardOffsetX + (g.Difficulty.GridDimensions.Cols * cellSize) + boardOffsetX
+	width = BoardOffsetX + (g.Difficulty.GridDimensions.Cols * CellSize) + BoardOffsetX
 
 	// Alto: borde superior + alto del tablero + borde inferior
-	height = boardOffsetY + (g.Difficulty.GridDimensions.Rows * cellSize) + boardOffsetX // usamos boardOffsetX porque el borde inferior es 12
+	height = BoardOffsetY + (g.Difficulty.GridDimensions.Rows * CellSize) + BoardOffsetX // usamos boardOffsetX porque el borde inferior es 12
 
 	return width, height
 }
@@ -586,36 +651,36 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func LoadSprite() (Sprite, error) {
-	spriteSheet, _, err := ebitenutil.NewImageFromFile("assets/sprites/board.png")
+	spriteSheet, _, err := ebitenutil.NewImageFromFileSystem(gameAssets, "assets/sprites/board.png")
 
 	images := map[string]*ebiten.Image{
-		"hidden":      spriteSheet.SubImage(image.Rect(0, 0, cellSize, cellSize)).(*ebiten.Image),
-		"flag":        spriteSheet.SubImage(image.Rect(cellSize*2, 0, cellSize*3, cellSize)).(*ebiten.Image),
-		"mineClicked": spriteSheet.SubImage(image.Rect(cellSize*6, 0, cellSize*7, cellSize)).(*ebiten.Image),
-		"mine":        spriteSheet.SubImage(image.Rect(cellSize*5, 0, cellSize*6, cellSize)).(*ebiten.Image),
-		"empty":       spriteSheet.SubImage(image.Rect(cellSize, 0, cellSize*2, cellSize)).(*ebiten.Image),
+		"hidden":      spriteSheet.SubImage(image.Rect(0, 0, CellSize, CellSize)).(*ebiten.Image),
+		"flag":        spriteSheet.SubImage(image.Rect(CellSize*2, 0, CellSize*3, CellSize)).(*ebiten.Image),
+		"mineClicked": spriteSheet.SubImage(image.Rect(CellSize*6, 0, CellSize*7, CellSize)).(*ebiten.Image),
+		"mine":        spriteSheet.SubImage(image.Rect(CellSize*5, 0, CellSize*6, CellSize)).(*ebiten.Image),
+		"empty":       spriteSheet.SubImage(image.Rect(CellSize, 0, CellSize*2, CellSize)).(*ebiten.Image),
 	}
 
 	for spriteNumb := 0; spriteNumb < 8; spriteNumb++ {
-		images[fmt.Sprintf("number_%d", spriteNumb+1)] = spriteSheet.SubImage(image.Rect(cellSize*spriteNumb, cellSize, cellSize*(spriteNumb+1), cellSize*2)).(*ebiten.Image)
+		images[fmt.Sprintf("number_%d", spriteNumb+1)] = spriteSheet.SubImage(image.Rect(CellSize*spriteNumb, CellSize, CellSize*(spriteNumb+1), CellSize*2)).(*ebiten.Image)
 	}
 
 	return Sprite{Image: images}, err
 }
 
-func main() {
-	ebiten.SetWindowSize(defaultWindowWidth, defaultWindowHeight)
-	ebiten.SetWindowTitle("MineSweeper")
-	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-
-	game, err := NewGame(Medium)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	game.AudioManager.LoadSound("totalmenchi", "./assets/sounds/totalmenchi.mp3")
-
-	if err := ebiten.RunGame(game); err != nil {
-		log.Fatal(err)
-	}
-}
+// func main() {
+// 	ebiten.SetWindowSize(DefaultWindowWidth, DefaultWindowHeight)
+// 	ebiten.SetWindowTitle("MineSweeper")
+// 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+//
+// 	game, err := NewGame(Medium)
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+//
+// 	game.AudioManager.LoadSound("totalmenchi", "./assets/sounds/totalmenchi.mp3")
+//
+// 	if err := ebiten.RunGame(game); err != nil {
+// 		log.Fatal(err)
+// 	}
+// }
