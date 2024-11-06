@@ -199,35 +199,6 @@ func (g *Game) handleRightClick(pos Coordinates) error {
 	return nil
 }
 
-// func (g *Game) HandleInput(Coordinates Coordinates, Action MouseAction) {
-// 	g.mu.RLock()
-// 	defer g.mu.RUnlock()
-// 	x, y := Coordinates.X, Coordinates.Y
-// 	pos, ok := g.ValidBoardPosition(x, y)
-// 	if !ok {
-// 		return
-// 	}
-//
-// 	if Action == LeftClick {
-// 		if g.FirstClick == nil {
-// 			g.FirstClick = &pos
-// 			g.InitializeBoardState()
-// 		}
-//
-// 		cellState := g.Board[pos]
-// 		if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
-// 			g.AudioManager.PlaySound("totalmenchi")
-// 		}
-//
-// 		g.RevealCell(pos)
-// 		g.CheckVictory()
-// 		return
-// 	}
-// 	if Action == RightClick {
-// 		g.ToggleFlag(pos)
-// 	}
-// }
-
 func NewAudioManager() (*AudioManager, error) {
 	context := audio.NewContext(sampleRate)
 	return &AudioManager{
@@ -242,17 +213,6 @@ func (am *AudioManager) LoadSound(name string, path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read sound data: %w", err)
 	}
-	// file, err := os.Open(path)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to open audio file: %w", err)
-	// }
-	//
-	// defer file.Close()
-	//
-	// data, err := io.ReadAll(file)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to read audio file: %w", err)
-	// }
 
 	reader := bytes.NewReader(soundData)
 	decoded, err := mp3.DecodeWithSampleRate(sampleRate, reader)
@@ -290,7 +250,6 @@ func NewGame(level DificultyLevel) (*Game, error) {
 		return nil, ErrInvalidDifficulty
 	}
 
-	// TODO: change name of the function to NewSprite
 	sprite, err := LoadSprite()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sprites: %w", err)
@@ -354,7 +313,6 @@ func (g *Game) HandleMineClicked(pos Coordinates) {
 	g.RevealAllMines()
 }
 
-// TODO: Implement Restart
 func (g *Game) Restart() {
 	g.Board = make(map[Coordinates]CellState)
 	g.MinePositions = make(map[Coordinates]bool)
@@ -520,9 +478,6 @@ func (g *Game) ScreenToBoard(screenX, screenY int) Coordinates {
 }
 
 func (g *Game) Update() error {
-	// g.mu.RLock()
-	// defer g.mu.RUnlock()
-
 	if g.State != Playing {
 		return nil
 	}
@@ -630,8 +585,8 @@ func (g *Game) RenderUI(screen *ebiten.Image) {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
+	// g.mu.RLock()
+	// defer g.mu.RUnlock()
 	g.RenderBoard(screen)
 	// g.RenderUI(screen)
 }
