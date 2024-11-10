@@ -26,7 +26,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type MinesweeperClient interface {
-	MakeMove(ctx context.Context, in *Move, opts ...grpc.CallOption) (*Empty, error)
+	MakeMove(ctx context.Context, in *Move, opts ...grpc.CallOption) (*GameState, error)
 }
 
 type minesweeperClient struct {
@@ -37,9 +37,9 @@ func NewMinesweeperClient(cc grpc.ClientConnInterface) MinesweeperClient {
 	return &minesweeperClient{cc}
 }
 
-func (c *minesweeperClient) MakeMove(ctx context.Context, in *Move, opts ...grpc.CallOption) (*Empty, error) {
+func (c *minesweeperClient) MakeMove(ctx context.Context, in *Move, opts ...grpc.CallOption) (*GameState, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Empty)
+	out := new(GameState)
 	err := c.cc.Invoke(ctx, Minesweeper_MakeMove_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func (c *minesweeperClient) MakeMove(ctx context.Context, in *Move, opts ...grpc
 // All implementations must embed UnimplementedMinesweeperServer
 // for forward compatibility.
 type MinesweeperServer interface {
-	MakeMove(context.Context, *Move) (*Empty, error)
+	MakeMove(context.Context, *Move) (*GameState, error)
 	mustEmbedUnimplementedMinesweeperServer()
 }
 
@@ -62,7 +62,7 @@ type MinesweeperServer interface {
 // pointer dereference when methods are called.
 type UnimplementedMinesweeperServer struct{}
 
-func (UnimplementedMinesweeperServer) MakeMove(context.Context, *Move) (*Empty, error) {
+func (UnimplementedMinesweeperServer) MakeMove(context.Context, *Move) (*GameState, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MakeMove not implemented")
 }
 func (UnimplementedMinesweeperServer) mustEmbedUnimplementedMinesweeperServer() {}

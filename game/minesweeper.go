@@ -37,11 +37,11 @@ var (
 	ErrAssetNotFound     = errors.New("game asset not found")
 )
 
-type MouseAction int
+type ActionEvent int
 
 const (
-	LeftClick MouseAction = iota
-	RightClick
+	RevealCell ActionEvent = iota
+	ToggleFlag
 )
 
 type GameState int
@@ -101,8 +101,10 @@ type GameStatistics struct {
 	FlagsAvailable int
 }
 
+type Board map[Coordinates]CellState
+
 type Game struct {
-	Board         map[Coordinates]CellState
+	Board         Board
 	MinePositions map[Coordinates]bool
 	AudioManager  *AudioManager
 	Statistics    *GameStatistics
@@ -111,6 +113,7 @@ type Game struct {
 	Difficulty    GameDifficulty
 	State         GameState
 	mu            sync.RWMutex
+	ModelReward   int
 }
 
 type Coordinates struct {
@@ -122,11 +125,11 @@ type Coordinates struct {
 // example: if isRevealed is true, isFlag should be false
 // example: if isFlag is true, isRevealed should be false
 type CellState struct {
-	minesAround   int
-	isMine        bool
-	isFlag        bool
-	isRevealed    bool
-	isMineClicked bool
+	minesAround    int
+	isMine         bool
+	isFlag         bool
+	isRevealed     bool
+	isMineSelected bool
 }
 
 type ClickEvent struct {
@@ -154,7 +157,7 @@ var (
 	ErrInvalidAction   = errors.New("invalid action")
 )
 
-func (g *Game) HandleInput(coordinates Coordinates, action MouseAction) error {
+func (g *Game) HandleInput(coordinates Coordinates, action ActionEvent) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -164,16 +167,16 @@ func (g *Game) HandleInput(coordinates Coordinates, action MouseAction) error {
 	}
 
 	switch action {
-	case LeftClick:
-		return g.handleLeftClick(pos)
-	case RightClick:
-		return g.handleRightClick(pos)
+	case RevealCell:
+		return g.handleRevealCell(pos)
+	case ToggleFlag:
+		return g.handleToggleFlag(pos)
 	default:
 		return ErrInvalidAction
 	}
 }
 
-func (g *Game) handleLeftClick(pos Coordinates) error {
+func (g *Game) handleRevealCell(pos Coordinates) error {
 	if g.FirstClick == nil {
 		g.FirstClick = &pos
 		g.InitializeBoardState()
@@ -194,7 +197,7 @@ func (g *Game) handleLeftClick(pos Coordinates) error {
 	return nil
 }
 
-func (g *Game) handleRightClick(pos Coordinates) error {
+func (g *Game) handleToggleFlag(pos Coordinates) error {
 	g.ToggleFlag(pos)
 	return nil
 }
@@ -304,9 +307,9 @@ func (g *Game) RevealAllMines() {
 	}
 }
 
-func (g *Game) HandleMineClicked(pos Coordinates) {
+func (g *Game) HandleMineSelected(pos Coordinates) {
 	cellState := g.Board[pos]
-	cellState.isMineClicked = true
+	cellState.isMineSelected = true
 	cellState.isRevealed = true
 	g.Board[pos] = cellState
 	g.State = Lost
@@ -347,13 +350,166 @@ func (g *Game) RevealCell(pos Coordinates) error {
 	}
 
 	if cellState.isMine {
-		g.HandleMineClicked(pos)
+		g.HandleMineSelected(pos)
 		return nil
 	}
 
 	g.RevealCellChain(pos)
 
 	return nil
+}
+
+// TODO: create map for the reward
+// func (g *Game) CalculateModelReward(pos Coordinates, OldBoard Board, action ActionEvent) int {
+// 	reward := 0
+//
+// 	if g.FirstClick == nil && action == RevealCell {
+// 		CellState := g.Board[pos]
+// 		if CellState.minesAround == 0 {
+// 			reward = 2
+// 		}
+// 		if CellState.minesAround > 0 {
+// 			reward = 1
+// 		}
+// 		return reward
+// 	}
+//
+// 	oldCellState := OldBoard[pos]
+//
+// 	if g.State == Won {
+// 		reward = 30
+// 	}
+//
+// 	if g.State == Lost {
+// 		reward = -10
+// 	}
+//
+// 	switch action {
+// 	case RevealCell:
+// 		if oldCellState.isRevealed {
+// 			reward = -1
+// 		}
+// 		if oldCellState.isFlag {
+// 			reward = -1
+// 		}
+// 		if oldCellState.minesAround == 0 {
+// 			reward = 2
+// 		}
+// 		if oldCellState.minesAround > 0 {
+// 			reward = 1
+// 		}
+// 	case ToggleFlag:
+// 		if g.Statistics.FlagsAvailable == 0 {
+// 			reward = -1
+// 		}
+// 		if oldCellState.isRevealed {
+// 			reward = -1
+// 		}
+// 		// TODO: we have to think about it
+// 		if oldCellState.isFlag && oldCellState.isMine {
+// 			reward = -10
+// 		}
+// 		if oldCellState.isFlag && !oldCellState.isMine {
+// 			reward = 1
+// 		}
+//
+// 		if oldCellState.isMine {
+// 			reward = 2
+// 		}
+// 		if !oldCellState.isMine {
+// 			reward = -5
+// 		}
+//
+// 	}
+// 	return reward
+// }
+
+func (g *Game) ModelState() [][]int32 {
+	const (
+		HIDDEN  = 0
+		FLAGGED = -1
+	)
+
+	rows := g.Difficulty.GridDimensions.Rows
+	cols := g.Difficulty.GridDimensions.Cols
+
+	state := make([][]int32, rows)
+	for r := range state {
+		state[r] = make([]int32, cols)
+	}
+
+	for y := 0; y < rows; y++ {
+		for x := 0; x < cols; x++ {
+			pos := Coordinates{X: x, Y: y}
+			cell := g.Board[pos]
+
+			switch {
+			case !cell.isRevealed:
+				if cell.isFlag {
+					state[y][x] = FLAGGED
+				} else {
+					state[y][x] = HIDDEN
+				}
+			case cell.isRevealed:
+				state[y][x] = int32(cell.minesAround)
+			}
+		}
+	}
+	return state
+}
+
+func (g *Game) CalculateModelReward(cellState CellState, action ActionEvent) int {
+	reward := 0
+
+	// if g.FirstClick == nil {
+	// 	return 0
+	// }
+	switch g.State {
+	case Won:
+		return 100
+	case Lost:
+		return -20
+	}
+
+	switch action {
+	case RevealCell:
+		switch {
+		case cellState.isRevealed:
+			reward = -2
+		case cellState.isFlag:
+			reward = -3
+		case cellState.minesAround == 0:
+			reward = 3
+		case cellState.minesAround > 0:
+			reward = 1
+		}
+
+	case ToggleFlag:
+		switch {
+		case g.Statistics.FlagsAvailable == 0:
+			reward = -2
+		case cellState.isRevealed:
+			reward = -2
+		case cellState.isFlag:
+			if cellState.isMine {
+				// Penalización moderada por quitar bandera de una mina
+				reward = -3
+			} else {
+				// Pequeña recompensa por corregir una bandera mal puesta
+				reward = 1
+			}
+		case !cellState.isFlag:
+			if cellState.isMine {
+				// Buena recompensa por marcar correctamente una mina
+				reward = 4
+			} else {
+				// Penalización moderada por uso incorrecto de bandera
+				reward = -2 // Reducido de -8.0 a -2.0
+			}
+		}
+	}
+
+	return reward
 }
 
 func (g *Game) RevealCellChain(position Coordinates) {
@@ -368,7 +524,7 @@ func (g *Game) RevealCellChain(position Coordinates) {
 	}
 
 	if cellState.isMine {
-		cellState.isMineClicked = true
+		cellState.isMineSelected = true
 		g.Board[position] = cellState
 		g.RevealAllMines()
 		return
@@ -485,14 +641,15 @@ func (g *Game) Update() error {
 	x, y := ebiten.CursorPosition()
 
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		g.HandleInput(Coordinates{X: x, Y: y}, LeftClick)
+		g.HandleInput(Coordinates{X: x, Y: y}, RevealCell)
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
-		g.HandleInput(Coordinates{X: x, Y: y}, RightClick)
+		g.HandleInput(Coordinates{X: x, Y: y}, ToggleFlag)
 	}
 	return nil
 }
 
+// TODO: maybe this func should return an error to handle it in the AI model
 func (g *Game) ToggleFlag(pos Coordinates) {
 	cellState := g.Board[pos]
 	if cellState.isRevealed {
@@ -557,8 +714,8 @@ func (g *Game) RenderBoard(screen *ebiten.Image) {
 			baseSpriteCell = g.Sprite.Image["flag"]
 		case !cellState.isRevealed:
 			baseSpriteCell = g.Sprite.Image["hidden"]
-		case cellState.isMineClicked:
-			baseSpriteCell = g.Sprite.Image["mineClicked"]
+		case cellState.isMineSelected:
+			baseSpriteCell = g.Sprite.Image["mineSelected"]
 		case cellState.isMine:
 			baseSpriteCell = g.Sprite.Image["mine"]
 		case cellState.minesAround > 0:
@@ -573,7 +730,7 @@ func (g *Game) RenderBoard(screen *ebiten.Image) {
 }
 
 func (g *Game) RenderUI(screen *ebiten.Image) {
-	baseSpriteCell := g.Sprite.Image["mineClicked"]
+	baseSpriteCell := g.Sprite.Image["mineSelected"]
 	opts := &ebiten.DrawImageOptions{}
 
 	tx := float64(CellSize)
@@ -585,8 +742,6 @@ func (g *Game) RenderUI(screen *ebiten.Image) {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	// g.mu.RLock()
-	// defer g.mu.RUnlock()
 	g.RenderBoard(screen)
 	// g.RenderUI(screen)
 }
@@ -609,11 +764,11 @@ func LoadSprite() (Sprite, error) {
 	spriteSheet, _, err := ebitenutil.NewImageFromFileSystem(gameAssets, "assets/sprites/board.png")
 
 	images := map[string]*ebiten.Image{
-		"hidden":      spriteSheet.SubImage(image.Rect(0, 0, CellSize, CellSize)).(*ebiten.Image),
-		"flag":        spriteSheet.SubImage(image.Rect(CellSize*2, 0, CellSize*3, CellSize)).(*ebiten.Image),
-		"mineClicked": spriteSheet.SubImage(image.Rect(CellSize*6, 0, CellSize*7, CellSize)).(*ebiten.Image),
-		"mine":        spriteSheet.SubImage(image.Rect(CellSize*5, 0, CellSize*6, CellSize)).(*ebiten.Image),
-		"empty":       spriteSheet.SubImage(image.Rect(CellSize, 0, CellSize*2, CellSize)).(*ebiten.Image),
+		"hidden":       spriteSheet.SubImage(image.Rect(0, 0, CellSize, CellSize)).(*ebiten.Image),
+		"flag":         spriteSheet.SubImage(image.Rect(CellSize*2, 0, CellSize*3, CellSize)).(*ebiten.Image),
+		"mineSelected": spriteSheet.SubImage(image.Rect(CellSize*6, 0, CellSize*7, CellSize)).(*ebiten.Image),
+		"mine":         spriteSheet.SubImage(image.Rect(CellSize*5, 0, CellSize*6, CellSize)).(*ebiten.Image),
+		"empty":        spriteSheet.SubImage(image.Rect(CellSize, 0, CellSize*2, CellSize)).(*ebiten.Image),
 	}
 
 	for spriteNumb := 0; spriteNumb < 8; spriteNumb++ {
@@ -622,20 +777,3 @@ func LoadSprite() (Sprite, error) {
 
 	return Sprite{Image: images}, err
 }
-
-// func main() {
-// 	ebiten.SetWindowSize(DefaultWindowWidth, DefaultWindowHeight)
-// 	ebiten.SetWindowTitle("MineSweeper")
-// 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-//
-// 	game, err := NewGame(Medium)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-//
-// 	game.AudioManager.LoadSound("totalmenchi", "./assets/sounds/totalmenchi.mp3")
-//
-// 	if err := ebiten.RunGame(game); err != nil {
-// 		log.Fatal(err)
-// 	}
-// }

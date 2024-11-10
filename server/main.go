@@ -59,27 +59,41 @@ func main() {
 	startEbitenWindow(game)
 }
 
-func (s *gameServer) MakeMove(ctx context.Context, move *pb.Move) (*pb.Empty, error) {
-	var action g.MouseAction
+func (s *gameServer) MakeMove(ctx context.Context, move *pb.Move) (*pb.GameState, error) {
+	var action g.ActionEvent
 	switch move.Action {
 	case 0:
-		action = g.LeftClick
+		action = g.RevealCell
 	case 1:
-		action = g.RightClick
+		action = g.ToggleFlag
 	default:
 		return nil, fmt.Errorf("invalid action: %d", move.Action)
 	}
 
 	coord := g.Coordinates{X: int(move.X), Y: int(move.Y)}
-
 	posx, posy := s.game.BoardToScreen(coord)
-
 	pos := g.Coordinates{X: int(posx), Y: int(posy)}
 
+	oldCellState := s.game.Board[coord]
+
 	err := s.game.HandleInput(pos, action)
+	modelState := s.game.ModelState()
+	reward := s.game.CalculateModelReward(oldCellState, action)
+
+	protoRows := make([]*pb.Row, len(modelState))
+	for i, row := range modelState {
+		protoRows[i] = &pb.Row{
+			Cells: row,
+		}
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
-	return &pb.Empty{}, nil
+	return &pb.GameState{
+		Board:  protoRows,
+		Reward: int32(reward),
+		State:  int32(s.game.State),
+	}, nil
 }
