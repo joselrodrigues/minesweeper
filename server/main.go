@@ -97,3 +97,21 @@ func (s *gameServer) MakeMove(ctx context.Context, move *pb.Move) (*pb.GameState
 		State:  int32(s.game.State),
 	}, nil
 }
+
+func (s *gameServer) Reset(ctx context.Context, _ *pb.Empty) (*pb.GameState, error) {
+	s.game.Restart()
+
+	modelState := s.game.ModelState()
+	protoRows := make([]*pb.Row, len(modelState))
+	for i, row := range modelState {
+		protoRows[i] = &pb.Row{
+			Cells: row,
+		}
+	}
+
+	return &pb.GameState{
+		Board:  protoRows,
+		Reward: 0,
+		State:  int32(s.game.State),
+	}, nil
+}

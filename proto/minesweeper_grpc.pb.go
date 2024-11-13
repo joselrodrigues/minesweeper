@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	Minesweeper_MakeMove_FullMethodName = "/minesweeper.Minesweeper/MakeMove"
+	Minesweeper_Reset_FullMethodName    = "/minesweeper.Minesweeper/Reset"
 )
 
 // MinesweeperClient is the client API for Minesweeper service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type MinesweeperClient interface {
 	MakeMove(ctx context.Context, in *Move, opts ...grpc.CallOption) (*GameState, error)
+	Reset(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*GameState, error)
 }
 
 type minesweeperClient struct {
@@ -47,11 +49,22 @@ func (c *minesweeperClient) MakeMove(ctx context.Context, in *Move, opts ...grpc
 	return out, nil
 }
 
+func (c *minesweeperClient) Reset(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*GameState, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GameState)
+	err := c.cc.Invoke(ctx, Minesweeper_Reset_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MinesweeperServer is the server API for Minesweeper service.
 // All implementations must embed UnimplementedMinesweeperServer
 // for forward compatibility.
 type MinesweeperServer interface {
 	MakeMove(context.Context, *Move) (*GameState, error)
+	Reset(context.Context, *Empty) (*GameState, error)
 	mustEmbedUnimplementedMinesweeperServer()
 }
 
@@ -64,6 +77,9 @@ type UnimplementedMinesweeperServer struct{}
 
 func (UnimplementedMinesweeperServer) MakeMove(context.Context, *Move) (*GameState, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MakeMove not implemented")
+}
+func (UnimplementedMinesweeperServer) Reset(context.Context, *Empty) (*GameState, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Reset not implemented")
 }
 func (UnimplementedMinesweeperServer) mustEmbedUnimplementedMinesweeperServer() {}
 func (UnimplementedMinesweeperServer) testEmbeddedByValue()                     {}
@@ -104,6 +120,24 @@ func _Minesweeper_MakeMove_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Minesweeper_Reset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MinesweeperServer).Reset(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Minesweeper_Reset_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MinesweeperServer).Reset(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Minesweeper_ServiceDesc is the grpc.ServiceDesc for Minesweeper service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -114,6 +148,10 @@ var Minesweeper_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MakeMove",
 			Handler:    _Minesweeper_MakeMove_Handler,
+		},
+		{
+			MethodName: "Reset",
+			Handler:    _Minesweeper_Reset_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

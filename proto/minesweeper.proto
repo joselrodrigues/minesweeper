@@ -5,6 +5,7 @@ option go_package = "minesweeper/proto";
 
 service Minesweeper {
   rpc MakeMove (Move) returns (GameState) {}
+  rpc Reset (Empty) returns (GameState) {}
 }
 
 message Move {
@@ -12,6 +13,7 @@ message Move {
   int32 y = 2;
   int32 action = 3; 
 }
+
 
 message Row {
   repeated sint32 cells = 1;
