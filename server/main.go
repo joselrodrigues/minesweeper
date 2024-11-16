@@ -40,7 +40,7 @@ func startEbitenWindow(game *g.Game) {
 	ebiten.SetWindowTitle("MineSweeper")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 
-	game.AudioManager.LoadSound("totalmenchi", "assets/sounds/totalmenchi.mp3")
+	// game.AudioManager.LoadSound("totalmenchi", "assets/sounds/totalmenchi.mp3")
 
 	if err := ebiten.RunGame(game); err != nil {
 		fmt.Errorf("ebiten error: %v", err)
@@ -83,7 +83,7 @@ func (s *gameServer) MakeMove(ctx context.Context, move *pb.Move) (*pb.GameState
 	protoRows := make([]*pb.Row, len(modelState))
 	for i, row := range modelState {
 		protoRows[i] = &pb.Row{
-			Cells: row,
+			Cell: row,
 		}
 	}
 
@@ -105,7 +105,7 @@ func (s *gameServer) Reset(ctx context.Context, _ *pb.Empty) (*pb.GameState, err
 	protoRows := make([]*pb.Row, len(modelState))
 	for i, row := range modelState {
 		protoRows[i] = &pb.Row{
-			Cells: row,
+			Cell: row,
 		}
 	}
 

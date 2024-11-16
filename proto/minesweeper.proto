@@ -16,12 +16,12 @@ message Move {
 
 
 message Row {
-  repeated sint32 cells = 1;
+  repeated sint32 Cell = 1;
 }
 
 
 message GameState {
-  repeated Row board = 1;
+  repeated Row Board = 1;
   int32 State = 2;
   int32 Reward = 3;
 } 

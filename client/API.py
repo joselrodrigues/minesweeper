@@ -16,10 +16,15 @@ class MinesweeperAPI:
     def __init__(self):
         self.stub = MinesweeperStub(channel)
 
+    def protobuf_board_to_array(self, proto_board):
+        return [list(board.Cell) for board in proto_board]
+
     def make_move(self, x, y, action):
         response = self.stub.MakeMove(Move(x=x, y=y, action=action))
-        return response.board, response.reward, response.state
+        board = self.protobuf_board_to_array(response.Board)
+        return board, response.Reward, response.State
 
     def reset(self):
         response = self.stub.Reset(Empty())
-        return response.board
+        board = self.protobuf_board_to_array(response.Board)
+        return board
