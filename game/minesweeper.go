@@ -156,7 +156,7 @@ var (
 )
 
 func (g *Game) HandleInput(coordinates Coordinates, action ActionEvent) error {
-	pos, ok := g.ValidBoardPosition(coordinates.X, coordinates.Y)
+	pos, ok := g.ValidateBoardPosition(coordinates.X, coordinates.Y)
 	if !ok {
 		return ErrInvalidPosition
 	}
@@ -535,7 +535,7 @@ func (g *Game) isOutOfBounds(position Coordinates) bool {
 	return position.X < 0 || position.Y < 0 || position.X >= g.Difficulty.GridDimensions.Cols || position.Y >= g.Difficulty.GridDimensions.Rows
 }
 
-func (g *Game) ValidBoardPosition(cursorX, cursorY int) (Coordinates, bool) {
+func (g *Game) ValidateBoardPosition(cursorX, cursorY int) (Coordinates, bool) {
 	cellX := (cursorX - BoardOffsetX) / CellSize
 	cellY := (cursorY - BoardOffsetY) / CellSize
 	pos := Coordinates{X: cellX, Y: cellY}

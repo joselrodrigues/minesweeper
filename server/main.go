@@ -8,6 +8,7 @@ import (
 	pb "minesweeper/proto"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"google.golang.org/grpc"
@@ -16,6 +17,7 @@ import (
 type gameServer struct {
 	pb.UnimplementedMinesweeperServer
 	game *g.Game
+	mu   sync.Mutex
 }
 
 func startGRPCServer(game *g.Game) {
@@ -60,6 +62,9 @@ func main() {
 }
 
 func (s *gameServer) MakeMove(ctx context.Context, move *pb.Move) (*pb.GameState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	var action g.ActionEvent
 	switch move.Action {
 	case 0:
@@ -99,6 +104,8 @@ func (s *gameServer) MakeMove(ctx context.Context, move *pb.Move) (*pb.GameState
 }
 
 func (s *gameServer) Reset(ctx context.Context, _ *pb.Empty) (*pb.GameState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.game.Restart()
 
 	modelState := s.game.ModelState()
