@@ -15,12 +15,12 @@ proto-go:
 proto-py:
 	python -m grpc_tools.protoc \
 		-I$(PROTO_DIR) \
-		--python_out=$(OUT_DIR) \
-		--grpc_python_out=$(OUT_DIR) \
+		--python_out=$(PROTO_DIR) \
+		--grpc_python_out=$(PROTO_DIR) \
 		$(PROTO_DIR)/$(PROTO_FILE)
 
 clean:
-	rm -f $(OUT_DIR)/*.pb.go
-	rm -f $(OUT_DIR)/*_pb2.py
-	rm -f $(OUT_DIR)/*_pb2_grpc.py
+	rm -f $(PROTO_DIR)/*.pb.go
+	rm -f $(PROTO_DIR)/*_pb2.py
+	rm -f $(PROTO_DIR)/*_pb2_grpc.py
 

@@ -8,58 +8,54 @@ import (
 	pb "minesweeper/proto"
 	"net"
 	"os"
+	"os/signal"
+	"runtime"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 type gameServer struct {
 	pb.UnimplementedMinesweeperServer
 	game *g.Game
+	mu   sync.Mutex
 }
 
-func startGRPCServer(game *g.Game) {
-	lis, err := net.Listen("tcp", ":50051")
-	if err != nil {
-		fmt.Errorf("failed to listen: %v", err)
-		os.Exit(1)
+var (
+	kaProps = keepalive.ServerParameters{
+		MaxConnectionIdle:     15 * time.Second,
+		MaxConnectionAge:      30 * time.Second,
+		MaxConnectionAgeGrace: 5 * time.Second,
+		Time:                  5 * time.Second,
+		Timeout:               1 * time.Second,
 	}
 
-	s := grpc.NewServer()
-	pb.RegisterMinesweeperServer(s, &gameServer{game: game})
-
-	log.Printf("Starting gRPC server on :50051")
-	if err := s.Serve(lis); err != nil {
-		fmt.Errorf("failed to serve: %v", err)
-		os.Exit(1)
+	kaPolicy = keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second,
+		PermitWithoutStream: true,
 	}
-}
+)
 
-func startEbitenWindow(game *g.Game) {
-	ebiten.SetWindowSize(g.DefaultWindowWidth, g.DefaultWindowHeight)
-	ebiten.SetWindowTitle("MineSweeper")
-	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-
-	game.AudioManager.LoadSound("totalmenchi", "assets/sounds/totalmenchi.mp3")
-
-	if err := ebiten.RunGame(game); err != nil {
-		fmt.Errorf("ebiten error: %v", err)
-		os.Exit(1)
+func newGameServer(game *g.Game) *gameServer {
+	return &gameServer{
+		game: game,
 	}
-}
-
-func main() {
-	game, err := g.NewGame(g.Medium)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	go startGRPCServer(game)
-
-	startEbitenWindow(game)
 }
 
 func (s *gameServer) MakeMove(ctx context.Context, move *pb.Move) (*pb.GameState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in MakeMove: %v", r)
+			runtime.GC()
+		}
+	}()
+
 	var action g.ActionEvent
 	switch move.Action {
 	case 0:
@@ -71,24 +67,20 @@ func (s *gameServer) MakeMove(ctx context.Context, move *pb.Move) (*pb.GameState
 	}
 
 	coord := g.Coordinates{X: int(move.X), Y: int(move.Y)}
-	posx, posy := s.game.BoardToScreen(coord)
-	pos := g.Coordinates{X: int(posx), Y: int(posy)}
+	oldCellState := s.game.GetCellState(coord)
 
-	oldCellState := s.game.Board[coord]
+	if err := s.game.HandleInput(coord, action); err != nil {
+		return nil, err
+	}
 
-	err := s.game.HandleInput(pos, action)
 	modelState := s.game.ModelState()
 	reward := s.game.CalculateModelReward(oldCellState, action)
 
 	protoRows := make([]*pb.Row, len(modelState))
 	for i, row := range modelState {
 		protoRows[i] = &pb.Row{
-			Cells: row,
+			Cell: row,
 		}
-	}
-
-	if err != nil {
-		return nil, err
 	}
 
 	return &pb.GameState{
@@ -99,13 +91,15 @@ func (s *gameServer) MakeMove(ctx context.Context, move *pb.Move) (*pb.GameState
 }
 
 func (s *gameServer) Reset(ctx context.Context, _ *pb.Empty) (*pb.GameState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.game.Restart()
 
 	modelState := s.game.ModelState()
 	protoRows := make([]*pb.Row, len(modelState))
 	for i, row := range modelState {
 		protoRows[i] = &pb.Row{
-			Cells: row,
+			Cell: row,
 		}
 	}
 
@@ -114,4 +108,69 @@ func (s *gameServer) Reset(ctx context.Context, _ *pb.Empty) (*pb.GameState, err
 		Reward: 0,
 		State:  int32(s.game.State),
 	}, nil
+}
+
+func startGRPCServer(game *g.Game) {
+	lis, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+
+	opts := []grpc.ServerOption{
+		grpc.KeepaliveParams(kaProps),
+		grpc.KeepaliveEnforcementPolicy(kaPolicy),
+		grpc.MaxConcurrentStreams(100),
+		grpc.WriteBufferSize(1024 * 1024),
+		grpc.ReadBufferSize(1024 * 1024),
+		grpc.MaxRecvMsgSize(4 * 1024 * 1024),
+		grpc.MaxSendMsgSize(4 * 1024 * 1024),
+		grpc.ConnectionTimeout(5 * time.Second),
+	}
+
+	s := grpc.NewServer(opts...)
+	srv := newGameServer(game)
+	pb.RegisterMinesweeperServer(s, srv)
+
+	// Manejo graceful shutdown
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
+		log.Println("Shutting down gRPC server...")
+		s.GracefulStop()
+	}()
+
+	log.Printf("Starting gRPC server on :50051")
+	if err := s.Serve(lis); err != nil {
+		log.Printf("failed to serve: %v", err)
+	}
+}
+
+func main() {
+	game, err := g.NewGame(g.Medium)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Canal para coordinar el cierre
+	done := make(chan struct{})
+
+	// Iniciar servidor gRPC
+	go func() {
+		startGRPCServer(game)
+		close(done)
+	}()
+
+	// Iniciar ventana Ebiten
+	ebiten.SetWindowSize(g.DefaultWindowWidth, g.DefaultWindowHeight)
+	ebiten.SetWindowTitle("MineSweeper")
+	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+
+	if err := ebiten.RunGame(game); err != nil {
+		log.Printf("Ebiten error: %v", err)
+	}
+	close(done)
+
+	// Esperar a que el servidor gRPC termine
+	<-done
 }

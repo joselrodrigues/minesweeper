@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11minesweeper.proto\x12\x0bminesweeper\",\n\x04Move\x12\t\n\x01x\x18\x01 \x01(\x05\x12\t\n\x01y\x18\x02 \x01(\x05\x12\x0e\n\x06\x61\x63tion\x18\x03 \x01(\x05\"\x14\n\x03Row\x12\r\n\x05\x63\x65lls\x18\x01 \x03(\x11\"K\n\tGameState\x12\x1f\n\x05\x62oard\x18\x01 \x03(\x0b\x32\x10.minesweeper.Row\x12\r\n\x05State\x18\x02 \x01(\x05\x12\x0e\n\x06Reward\x18\x03 \x01(\x05\"\x07\n\x05\x45mpty2}\n\x0bMinesweeper\x12\x37\n\x08MakeMove\x12\x11.minesweeper.Move\x1a\x16.minesweeper.GameState\"\x00\x12\x35\n\x05Reset\x12\x12.minesweeper.Empty\x1a\x16.minesweeper.GameState\"\x00\x42\x13Z\x11minesweeper/protob\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11minesweeper.proto\x12\x0bminesweeper\",\n\x04Move\x12\t\n\x01x\x18\x01 \x01(\x05\x12\t\n\x01y\x18\x02 \x01(\x05\x12\x0e\n\x06\x61\x63tion\x18\x03 \x01(\x05\"\x13\n\x03Row\x12\x0c\n\x04\x43\x65ll\x18\x01 \x03(\x11\"K\n\tGameState\x12\x1f\n\x05\x42oard\x18\x01 \x03(\x0b\x32\x10.minesweeper.Row\x12\r\n\x05State\x18\x02 \x01(\x05\x12\x0e\n\x06Reward\x18\x03 \x01(\x05\"\x07\n\x05\x45mpty2}\n\x0bMinesweeper\x12\x37\n\x08MakeMove\x12\x11.minesweeper.Move\x1a\x16.minesweeper.GameState\"\x00\x12\x35\n\x05Reset\x12\x12.minesweeper.Empty\x1a\x16.minesweeper.GameState\"\x00\x42\x13Z\x11minesweeper/protob\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,11 +35,11 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_MOVE']._serialized_start=34
   _globals['_MOVE']._serialized_end=78
   _globals['_ROW']._serialized_start=80
-  _globals['_ROW']._serialized_end=100
-  _globals['_GAMESTATE']._serialized_start=102
-  _globals['_GAMESTATE']._serialized_end=177
-  _globals['_EMPTY']._serialized_start=179
-  _globals['_EMPTY']._serialized_end=186
-  _globals['_MINESWEEPER']._serialized_start=188
-  _globals['_MINESWEEPER']._serialized_end=313
+  _globals['_ROW']._serialized_end=99
+  _globals['_GAMESTATE']._serialized_start=101
+  _globals['_GAMESTATE']._serialized_end=176
+  _globals['_EMPTY']._serialized_start=178
+  _globals['_EMPTY']._serialized_end=185
+  _globals['_MINESWEEPER']._serialized_start=187
+  _globals['_MINESWEEPER']._serialized_end=312
 # @@protoc_insertion_point(module_scope)

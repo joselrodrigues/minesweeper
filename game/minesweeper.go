@@ -8,7 +8,6 @@ import (
 	"image"
 	_ "image/png"
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -112,7 +111,6 @@ type Game struct {
 	Sprite        Sprite
 	Difficulty    GameDifficulty
 	State         GameState
-	mu            sync.RWMutex
 	ModelReward   int
 }
 
@@ -157,11 +155,12 @@ var (
 	ErrInvalidAction   = errors.New("invalid action")
 )
 
-func (g *Game) HandleInput(coordinates Coordinates, action ActionEvent) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (g *Game) GetCellState(pos Coordinates) CellState {
+	return g.Board[pos]
+}
 
-	pos, ok := g.ValidBoardPosition(coordinates.X, coordinates.Y)
+func (g *Game) HandleInput(coordinates Coordinates, action ActionEvent) error {
+	pos, ok := g.ValidateBoardPosition(coordinates.X, coordinates.Y)
 	if !ok {
 		return ErrInvalidPosition
 	}
@@ -182,12 +181,12 @@ func (g *Game) handleRevealCell(pos Coordinates) error {
 		g.InitializeBoardState()
 	}
 
-	cellState := g.Board[pos]
-	if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
-		if err := g.AudioManager.PlaySound("totalmenchi"); err != nil {
-			fmt.Printf("audio error: %v", err)
-		}
-	}
+	// cellState := g.Board[pos]
+	// if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
+	// 	if err := g.AudioManager.PlaySound("totalmenchi"); err != nil {
+	// 		fmt.Printf("audio error: %v", err)
+	// 	}
+	// }
 
 	if err := g.RevealCell(pos); err != nil {
 		return fmt.Errorf("reveal cell error: %w", err)
@@ -258,7 +257,7 @@ func NewGame(level DificultyLevel) (*Game, error) {
 		return nil, fmt.Errorf("failed to load sprites: %w", err)
 	}
 
-	audioManager, err := NewAudioManager()
+	// audioManager, err := NewAudioManager()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize audio: %w", err)
 	}
@@ -268,10 +267,10 @@ func NewGame(level DificultyLevel) (*Game, error) {
 		MinePositions: make(map[Coordinates]bool),
 		Statistics:    &GameStatistics{StartTime: time.Now(), FlagsAvailable: difficulty.NumberOfMines},
 		Difficulty:    difficulty,
-		AudioManager:  audioManager,
-		State:         Playing,
-		Sprite:        sprite,
-		FirstClick:    nil,
+		// AudioManager:  audioManager,
+		State:      Playing,
+		Sprite:     sprite,
+		FirstClick: nil,
 	}
 
 	// TODO: mabye shoudl handle error
@@ -325,10 +324,10 @@ func (g *Game) Restart() {
 
 	g.CreateBoard()
 
-	for _, player := range g.AudioManager.sounds {
-		player.Rewind()
-		player.Pause()
-	}
+	// for _, player := range g.AudioManager.sounds {
+	// 	player.Rewind()
+	// 	player.Pause()
+	// }
 }
 
 func (g *Game) RevealCell(pos Coordinates) error {
@@ -513,43 +512,96 @@ func (g *Game) CalculateModelReward(cellState CellState, action ActionEvent) int
 }
 
 func (g *Game) RevealCellChain(position Coordinates) {
-	if g.isOutOfBounds(position) {
-		return
-	}
+	// Usar una cola en lugar de recursión
+	queue := []Coordinates{position}
+	visited := make(map[Coordinates]bool)
 
-	cellState := g.Board[position]
+	for len(queue) > 0 {
+		// Tomar la siguiente posición de la cola
+		currentPos := queue[0]
+		queue = queue[1:]
 
-	if cellState.isRevealed || cellState.isFlag {
-		return
-	}
+		// Si ya visitamos esta posición o está fuera de límites, continuar
+		if visited[currentPos] || g.isOutOfBounds(currentPos) {
+			continue
+		}
+		visited[currentPos] = true
 
-	if cellState.isMine {
-		cellState.isMineSelected = true
-		g.Board[position] = cellState
-		g.RevealAllMines()
-		return
-	}
+		cellState := g.Board[currentPos]
 
-	if cellState.minesAround > 0 {
-		cellState.isRevealed = true
-		g.Board[position] = cellState
-		return
-	}
-
-	for _, neighbor := range PositionNeighbors {
-		neighborPos := Coordinates{X: position.X + neighbor.X, Y: position.Y + neighbor.Y}
-
-		if g.isOutOfBounds(neighborPos) {
+		// Si la celda está revelada o tiene bandera, continuar
+		if cellState.isRevealed || cellState.isFlag {
 			continue
 		}
 
+		// Si es una mina, manejarla y terminar
+		if cellState.isMine {
+			cellState.isMineSelected = true
+			g.Board[currentPos] = cellState
+			g.RevealAllMines()
+			return
+		}
+
+		// Revelar la celda actual
 		cellState.isRevealed = true
-		g.Board[position] = cellState
-		if cellState.minesAround == 0 && !g.Board[neighborPos].isMine {
-			g.RevealCellChain(neighborPos)
+		g.Board[currentPos] = cellState
+
+		// Si la celda tiene número, no expandir más
+		if cellState.minesAround > 0 {
+			continue
+		}
+
+		// Agregar vecinos a la cola
+		for _, neighbor := range PositionNeighbors {
+			neighborPos := Coordinates{
+				X: currentPos.X + neighbor.X,
+				Y: currentPos.Y + neighbor.Y,
+			}
+			if !g.isOutOfBounds(neighborPos) && !visited[neighborPos] {
+				queue = append(queue, neighborPos)
+			}
 		}
 	}
 }
+
+// func (g *Game) RevealCellChain(position Coordinates) {
+// 	if g.isOutOfBounds(position) {
+// 		return
+// 	}
+//
+// 	cellState := g.Board[position]
+//
+// 	if cellState.isRevealed || cellState.isFlag {
+// 		return
+// 	}
+//
+// 	if cellState.isMine {
+// 		cellState.isMineSelected = true
+// 		g.Board[position] = cellState
+// 		g.RevealAllMines()
+// 		return
+// 	}
+//
+// 	if cellState.minesAround > 0 {
+// 		cellState.isRevealed = true
+// 		g.Board[position] = cellState
+// 		return
+// 	}
+//
+// 	for _, neighbor := range PositionNeighbors {
+// 		neighborPos := Coordinates{X: position.X + neighbor.X, Y: position.Y + neighbor.Y}
+//
+// 		if g.isOutOfBounds(neighborPos) {
+// 			continue
+// 		}
+//
+// 		cellState.isRevealed = true
+// 		g.Board[position] = cellState
+// 		if cellState.minesAround == 0 && !g.Board[neighborPos].isMine {
+// 			g.RevealCellChain(neighborPos)
+// 		}
+// 	}
+// }
 
 func (g *Game) CalculateMinesAround(position Coordinates) {
 	mines := g.MinePositions
@@ -608,7 +660,15 @@ func (g *Game) isOutOfBounds(position Coordinates) bool {
 	return position.X < 0 || position.Y < 0 || position.X >= g.Difficulty.GridDimensions.Cols || position.Y >= g.Difficulty.GridDimensions.Rows
 }
 
-func (g *Game) ValidBoardPosition(cursorX, cursorY int) (Coordinates, bool) {
+func (g *Game) ValidateBoardPosition(x, y int) (Coordinates, bool) {
+	pos := Coordinates{X: x, Y: y}
+	if g.isOutOfBounds(pos) {
+		return Coordinates{}, false
+	}
+	return pos, true
+}
+
+func (g *Game) ValidateScreenPosition(cursorX, cursorY int) (Coordinates, bool) {
 	cellX := (cursorX - BoardOffsetX) / CellSize
 	cellY := (cursorY - BoardOffsetY) / CellSize
 	pos := Coordinates{X: cellX, Y: cellY}
@@ -627,6 +687,25 @@ func (g *Game) ValidBoardPosition(cursorX, cursorY int) (Coordinates, bool) {
 	return pos, true
 }
 
+// func (g *Game) ValidBoardPosition(cursorX, cursorY int) (Coordinates, bool) {
+// 	cellX := (cursorX - BoardOffsetX) / CellSize
+// 	cellY := (cursorY - BoardOffsetY) / CellSize
+// 	pos := Coordinates{X: cellX, Y: cellY}
+//
+// 	cellRect := image.Rect(
+// 		BoardOffsetX+cellX*CellSize,
+// 		BoardOffsetY+cellY*CellSize,
+// 		BoardOffsetX+(cellX+1)*CellSize,
+// 		BoardOffsetY+(cellY+1)*CellSize,
+// 	)
+//
+// 	if !image.Pt(cursorX, cursorY).In(cellRect) || g.isOutOfBounds(pos) {
+// 		return Coordinates{}, false
+// 	}
+//
+// 	return pos, true
+// }
+
 func (g *Game) ScreenToBoard(screenX, screenY int) Coordinates {
 	boardX := (screenX - BoardOffsetX) / CellSize
 	boardY := (screenY - BoardOffsetY) / CellSize
@@ -639,12 +718,15 @@ func (g *Game) Update() error {
 	}
 
 	x, y := ebiten.CursorPosition()
-
+	pos, ok := g.ValidateScreenPosition(x, y)
+	if !ok {
+		return nil
+	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		g.HandleInput(Coordinates{X: x, Y: y}, RevealCell)
+		g.HandleInput(pos, RevealCell)
 	}
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
-		g.HandleInput(Coordinates{X: x, Y: y}, ToggleFlag)
+		g.HandleInput(pos, ToggleFlag)
 	}
 	return nil
 }

@@ -1,4 +1,6 @@
 import math
+import grpc
+
 import random
 import matplotlib
 import matplotlib.pyplot as plt
@@ -12,6 +14,12 @@ import torch.nn.functional as F
 
 
 from .API import MinesweeperAPI
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 is_ipython = "inline" in matplotlib.get_backend()
 if is_ipython:
@@ -156,6 +164,7 @@ class DQNAgent:
             pos = random.randint(0, self.game_rows * self.game_cols - 1)
             action = random.randint(0, 1)
             x, y = self.flat_to_coord(pos)
+            print(f"Random action: ({x}, {y}) - action: {action}")
             return (x, y), action
 
         # Explotación: usar la red
@@ -169,6 +178,9 @@ class DQNAgent:
             )  # mejor acción para cada posición
             best_pos = best_value.argmax()  # mejor posición
             best_action = best_action[best_pos]  # acción para la mejor posición
+            print(
+                f"Network action: ({x}, {y}) - action: {best_action.item()}"
+            )  # Debug log
 
             x, y = self.flat_to_coord(best_pos.item())
             return (x, y), best_action.item()
@@ -176,17 +188,24 @@ class DQNAgent:
     def optimize_model(self):
         if len(self.memory) < self.batch_size:
             return
-
-        # Muestrear un batch de la memoria
         transitions = self.memory.sample(self.batch_size)
         batch = Transition(*zip(*transitions))
 
-        # Crear máscara para estados no finales (donde next_state no es None)
+        # Procesar las acciones
+        actions = []
+        for action in batch.action:
+            coords, action_type = action
+            x, y = coords
+            pos = self.coord_to_flat(x, y)
+            flat_action = pos * 2 + action_type
+            actions.append(flat_action)
+
         non_final_mask = torch.tensor(
             tuple(map(lambda s: s is not None, batch.next_state)),
             device=self.device,
             dtype=torch.bool,
         )
+
         non_final_next_states = torch.cat(
             [
                 torch.FloatTensor(s).unsqueeze(0).unsqueeze(0)
@@ -195,35 +214,189 @@ class DQNAgent:
             ]
         ).to(self.device)
 
-        # Preparar batch para la red
         state_batch = torch.cat(
             [torch.FloatTensor(s).unsqueeze(0).unsqueeze(0) for s in batch.state]
         ).to(self.device)
-        action_batch = torch.tensor(batch.action).to(self.device)
+
+        action_batch = torch.tensor(actions).to(self.device)
         reward_batch = torch.tensor(batch.reward).to(self.device)
 
         # Calcular Q(s_t, a)
-        state_action_values = self.policy_net(state_batch).squeeze()
+        all_q_values = self.policy_net(state_batch)
+        state_action_values = all_q_values.view(self.batch_size, -1).gather(
+            1, action_batch.unsqueeze(1)
+        )
 
         # Calcular V(s_{t+1}) para todos los next states
         next_state_values = torch.zeros(self.batch_size, device=self.device)
-        with torch.no_grad():
-            next_state_values[non_final_mask] = self.target_net(
-                non_final_next_states
-            ).max(1)[0]
+
+        if len(non_final_next_states) > 0:
+            with torch.no_grad():
+                # Obtener Q-values para los next states
+                next_q_values = self.target_net(non_final_next_states)
+                # Reshape a (batch_size, num_positions * num_actions)
+                next_q_values = next_q_values.view(next_q_values.size(0), -1)
+                # Obtener el máximo Q-value para cada estado
+                next_state_values[non_final_mask] = next_q_values.max(1)[0]
 
         # Calcular expected Q values
         expected_state_action_values = (next_state_values * self.gamma) + reward_batch
 
-        # Calcular la pérdida Huber
+        # Calcular pérdida
         loss = F.smooth_l1_loss(
             state_action_values, expected_state_action_values.unsqueeze(1)
         )
 
-        # Optimizar el modelo
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+        # def optimize_model(self):
+        #     if len(self.memory) < self.batch_size:
+        #         return
+        #
+        #     transitions = self.memory.sample(self.batch_size)
+        #     batch = Transition(*zip(*transitions))
+        #
+        #     # Procesar las acciones
+        #     actions = []
+        #     for action in batch.action:
+        #         coords, action_type = action
+        #         x, y = coords
+        #         pos = self.coord_to_flat(x, y)
+        #         flat_action = pos * 2 + action_type
+        #         actions.append(flat_action)
+        #
+        #     non_final_mask = torch.tensor(
+        #         tuple(map(lambda s: s is not None, batch.next_state)),
+        #         device=self.device,
+        #         dtype=torch.bool,
+        #     )
+        #     non_final_next_states = torch.cat(
+        #         [
+        #             torch.FloatTensor(s).unsqueeze(0).unsqueeze(0)
+        #             for s in batch.next_state
+        #             if s is not None
+        #         ]
+        #     ).to(self.device)
+        #
+        #     state_batch = torch.cat(
+        #         [torch.FloatTensor(s).unsqueeze(0).unsqueeze(0) for s in batch.state]
+        #     ).to(self.device)
+        #     action_batch = torch.tensor(actions).to(self.device)
+        #     reward_batch = torch.tensor(batch.reward).to(self.device)
+        #
+        #     # Calcular Q(s_t, a) - aquí está el cambio principal
+        #     all_q_values = self.policy_net(state_batch)  # Shape: (batch_size, positions*2)
+        #     state_action_values = all_q_values.view(self.batch_size, -1).gather(
+        #         1, action_batch.unsqueeze(1)
+        #     )
+        #
+        #     # Calcular V(s_{t+1}) para todos los next states
+        #     next_state_values = torch.zeros(self.batch_size, device=self.device)
+        #     with torch.no_grad():
+        #         next_state_values[non_final_mask] = (
+        #             self.target_net(non_final_next_states)
+        #             .view(self.batch_size, -1)
+        #             .max(1)[0]
+        #         )
+        #
+        #     # Calcular expected Q values
+        #     expected_state_action_values = (next_state_values * self.gamma) + reward_batch
+        #
+        #     # Calcular pérdida
+        #     loss = F.smooth_l1_loss(
+        #         state_action_values, expected_state_action_values.unsqueeze(1)
+        #     )
+        #
+        #     # Optimizar
+        #     self.optimizer.zero_grad()
+        #     loss.backward()
+        #     self.optimizer.step()
+        #
+        # def optimize_model(self):
+        #     if len(self.memory) < self.batch_size:
+        #         return
+        #
+        #     # Muestrear un batch de la memoria
+        #     # transitions = self.memory.sample(self.batch_size)
+        #     # batch = Transition(*zip(*transitions))
+        #     #
+        #     # # Crear máscara para estados no finales (donde next_state no es None)
+        #     # non_final_mask = torch.tensor(
+        #     #     tuple(map(lambda s: s is not None, batch.next_state)),
+        #     #     device=self.device,
+        #     #     dtype=torch.bool,
+        #     # )
+        #     # non_final_next_states = torch.cat(
+        #     #     [
+        #     #         torch.FloatTensor(s).unsqueeze(0).unsqueeze(0)
+        #     #         for s in batch.next_state
+        #     #         if s is not None
+        #     #     ]
+        #     # ).to(self.device)
+        #     #
+        #     # # Preparar batch para la red
+        #     # state_batch = torch.cat(
+        #     #     [torch.FloatTensor(s).unsqueeze(0).unsqueeze(0) for s in batch.state]
+        #     # ).to(self.device)
+        #     # action_batch = torch.tensor(batch.action).to(self.device)
+        #     # reward_batch = torch.tensor(batch.reward).to(self.device)
+        #     if len(self.memory) < self.batch_size:
+        #         return
+        #
+        #     transitions = self.memory.sample(self.batch_size)
+        #     batch = Transition(*zip(*transitions))
+        #
+        #     # Procesar las acciones: convertir tuplas ((x,y), action_type) a índices planos
+        #     actions = []
+        #     for action in batch.action:
+        #         coords, action_type = action  # Desempaquetar la tupla
+        #         x, y = coords
+        #         pos = self.coord_to_flat(x, y)  # Convertir coordenadas a posición plana
+        #         flat_action = pos * 2 + action_type  # Combinar posición y tipo de acción
+        #         actions.append(flat_action)
+        #
+        #     # Crear máscara para estados no finales
+        #     non_final_mask = torch.tensor(
+        #         tuple(map(lambda s: s is not None, batch.next_state)),
+        #         device=self.device,
+        #         dtype=torch.bool,
+        #     )
+        #     non_final_next_states = torch.cat(
+        #         [
+        #             torch.FloatTensor(s).unsqueeze(0).unsqueeze(0)
+        #             for s in batch.next_state
+        #             if s is not None
+        #         ]
+        #     ).to(self.device)
+        #
+        #     state_batch = torch.cat(
+        #         [torch.FloatTensor(s).unsqueeze(0).unsqueeze(0) for s in batch.state]
+        #     ).to(self.device)
+        #     action_batch = torch.tensor(actions).to(self.device)
+        #     reward_batch = torch.tensor(batch.reward).to(self.device)
+        # Calcular Q(s_t, a)
+        # state_action_values = self.policy_net(state_batch).squeeze()
+        #
+        # # Calcular V(s_{t+1}) para todos los next states
+        # next_state_values = torch.zeros(self.batch_size, device=self.device)
+        # with torch.no_grad():
+        #     next_state_values[non_final_mask] = self.target_net(
+        #         non_final_next_states
+        #     ).max(1)[0]
+        #
+        # # Calcular expected Q values
+        # expected_state_action_values = (next_state_values * self.gamma) + reward_batch
+        #
+        # # Calcular la pérdida Huber
+        # loss = F.smooth_l1_loss(
+        #     state_action_values, expected_state_action_values.unsqueeze(1)
+        # )
+        #
+        # # Optimizar el modelo
+        # self.optimizer.zero_grad()
+        # loss.backward()
+        # self.optimizer.step()
 
 
 # Clase ambiente que interactúa con la API
@@ -231,6 +404,11 @@ class DQNEnv:
     def __init__(self):
         self.api = MinesweeperAPI()
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type(grpc.RpcError),
+    )
     def step(self, action):
         x, y = action[0]  # Las coordenadas
         action_type = action[1]  # revelar/bandera

@@ -13,3 +13,4 @@ torchaudio
 optuna
 grpcio
 grpcio-tools
+tenacity
