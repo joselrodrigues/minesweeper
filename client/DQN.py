@@ -176,17 +176,24 @@ class DQNAgent:
     def optimize_model(self):
         if len(self.memory) < self.batch_size:
             return
-
-        # Muestrear un batch de la memoria
         transitions = self.memory.sample(self.batch_size)
         batch = Transition(*zip(*transitions))
 
-        # Crear máscara para estados no finales (donde next_state no es None)
+        # Procesar las acciones
+        actions = []
+        for action in batch.action:
+            coords, action_type = action
+            x, y = coords
+            pos = self.coord_to_flat(x, y)
+            flat_action = pos * 2 + action_type
+            actions.append(flat_action)
+
         non_final_mask = torch.tensor(
             tuple(map(lambda s: s is not None, batch.next_state)),
             device=self.device,
             dtype=torch.bool,
         )
+
         non_final_next_states = torch.cat(
             [
                 torch.FloatTensor(s).unsqueeze(0).unsqueeze(0)
@@ -195,32 +202,39 @@ class DQNAgent:
             ]
         ).to(self.device)
 
-        # Preparar batch para la red
         state_batch = torch.cat(
             [torch.FloatTensor(s).unsqueeze(0).unsqueeze(0) for s in batch.state]
         ).to(self.device)
-        action_batch = torch.tensor(batch.action).to(self.device)
+
+        action_batch = torch.tensor(actions).to(self.device)
         reward_batch = torch.tensor(batch.reward).to(self.device)
 
         # Calcular Q(s_t, a)
-        state_action_values = self.policy_net(state_batch).squeeze()
+        all_q_values = self.policy_net(state_batch)
+        state_action_values = all_q_values.view(self.batch_size, -1).gather(
+            1, action_batch.unsqueeze(1)
+        )
 
         # Calcular V(s_{t+1}) para todos los next states
         next_state_values = torch.zeros(self.batch_size, device=self.device)
-        with torch.no_grad():
-            next_state_values[non_final_mask] = self.target_net(
-                non_final_next_states
-            ).max(1)[0]
+
+        if len(non_final_next_states) > 0:
+            with torch.no_grad():
+                # Obtener Q-values para los next states
+                next_q_values = self.target_net(non_final_next_states)
+                # Reshape a (batch_size, num_positions * num_actions)
+                next_q_values = next_q_values.view(next_q_values.size(0), -1)
+                # Obtener el máximo Q-value para cada estado
+                next_state_values[non_final_mask] = next_q_values.max(1)[0]
 
         # Calcular expected Q values
         expected_state_action_values = (next_state_values * self.gamma) + reward_batch
 
-        # Calcular la pérdida Huber
+        # Calcular pérdida
         loss = F.smooth_l1_loss(
             state_action_values, expected_state_action_values.unsqueeze(1)
         )
 
-        # Optimizar el modelo
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()

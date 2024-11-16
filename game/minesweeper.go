@@ -8,7 +8,6 @@ import (
 	"image"
 	_ "image/png"
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -106,14 +105,14 @@ type Board map[Coordinates]CellState
 type Game struct {
 	Board         Board
 	MinePositions map[Coordinates]bool
-	AudioManager  *AudioManager
-	Statistics    *GameStatistics
-	FirstClick    *Coordinates
-	Sprite        Sprite
-	Difficulty    GameDifficulty
-	State         GameState
-	mu            sync.RWMutex
-	ModelReward   int
+	// AudioManager  *AudioManager
+	Statistics *GameStatistics
+	FirstClick *Coordinates
+	Sprite     Sprite
+	Difficulty GameDifficulty
+	State      GameState
+	// mu            sync.RWMutex
+	ModelReward int
 }
 
 type Coordinates struct {
@@ -151,16 +150,12 @@ type GameDifficulty struct {
 	GridDimensions GridDimensions
 }
 
-// Podrías añadir constantes de error
 var (
 	ErrInvalidPosition = errors.New("invalid board position")
 	ErrInvalidAction   = errors.New("invalid action")
 )
 
 func (g *Game) HandleInput(coordinates Coordinates, action ActionEvent) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
 	pos, ok := g.ValidBoardPosition(coordinates.X, coordinates.Y)
 	if !ok {
 		return ErrInvalidPosition
@@ -182,12 +177,12 @@ func (g *Game) handleRevealCell(pos Coordinates) error {
 		g.InitializeBoardState()
 	}
 
-	cellState := g.Board[pos]
-	if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
-		if err := g.AudioManager.PlaySound("totalmenchi"); err != nil {
-			fmt.Printf("audio error: %v", err)
-		}
-	}
+	// cellState := g.Board[pos]
+	// if cellState.minesAround == 0 && !cellState.isMine && !cellState.isRevealed && !cellState.isFlag {
+	// 	if err := g.AudioManager.PlaySound("totalmenchi"); err != nil {
+	// 		fmt.Printf("audio error: %v", err)
+	// 	}
+	// }
 
 	if err := g.RevealCell(pos); err != nil {
 		return fmt.Errorf("reveal cell error: %w", err)
@@ -258,20 +253,20 @@ func NewGame(level DificultyLevel) (*Game, error) {
 		return nil, fmt.Errorf("failed to load sprites: %w", err)
 	}
 
-	audioManager, err := NewAudioManager()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize audio: %w", err)
-	}
+	// audioManager, err := NewAudioManager()
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to initialize audio: %w", err)
+	// }
 
 	game := &Game{
 		Board:         make(map[Coordinates]CellState),
 		MinePositions: make(map[Coordinates]bool),
 		Statistics:    &GameStatistics{StartTime: time.Now(), FlagsAvailable: difficulty.NumberOfMines},
 		Difficulty:    difficulty,
-		AudioManager:  audioManager,
-		State:         Playing,
-		Sprite:        sprite,
-		FirstClick:    nil,
+		// AudioManager:  audioManager,
+		State:      Playing,
+		Sprite:     sprite,
+		FirstClick: nil,
 	}
 
 	// TODO: mabye shoudl handle error
@@ -324,11 +319,11 @@ func (g *Game) Restart() {
 	g.FirstClick = nil
 
 	g.CreateBoard()
-
-	for _, player := range g.AudioManager.sounds {
-		player.Rewind()
-		player.Pause()
-	}
+	//
+	// for _, player := range g.AudioManager.sounds {
+	// 	player.Rewind()
+	// 	player.Pause()
+	// }
 }
 
 func (g *Game) RevealCell(pos Coordinates) error {
@@ -358,71 +353,6 @@ func (g *Game) RevealCell(pos Coordinates) error {
 
 	return nil
 }
-
-// TODO: create map for the reward
-// func (g *Game) CalculateModelReward(pos Coordinates, OldBoard Board, action ActionEvent) int {
-// 	reward := 0
-//
-// 	if g.FirstClick == nil && action == RevealCell {
-// 		CellState := g.Board[pos]
-// 		if CellState.minesAround == 0 {
-// 			reward = 2
-// 		}
-// 		if CellState.minesAround > 0 {
-// 			reward = 1
-// 		}
-// 		return reward
-// 	}
-//
-// 	oldCellState := OldBoard[pos]
-//
-// 	if g.State == Won {
-// 		reward = 30
-// 	}
-//
-// 	if g.State == Lost {
-// 		reward = -10
-// 	}
-//
-// 	switch action {
-// 	case RevealCell:
-// 		if oldCellState.isRevealed {
-// 			reward = -1
-// 		}
-// 		if oldCellState.isFlag {
-// 			reward = -1
-// 		}
-// 		if oldCellState.minesAround == 0 {
-// 			reward = 2
-// 		}
-// 		if oldCellState.minesAround > 0 {
-// 			reward = 1
-// 		}
-// 	case ToggleFlag:
-// 		if g.Statistics.FlagsAvailable == 0 {
-// 			reward = -1
-// 		}
-// 		if oldCellState.isRevealed {
-// 			reward = -1
-// 		}
-// 		// TODO: we have to think about it
-// 		if oldCellState.isFlag && oldCellState.isMine {
-// 			reward = -10
-// 		}
-// 		if oldCellState.isFlag && !oldCellState.isMine {
-// 			reward = 1
-// 		}
-//
-// 		if oldCellState.isMine {
-// 			reward = 2
-// 		}
-// 		if !oldCellState.isMine {
-// 			reward = -5
-// 		}
-//
-// 	}
-// 	return reward
-// }
 
 func (g *Game) ModelState() [][]int32 {
 	const (
@@ -461,9 +391,6 @@ func (g *Game) ModelState() [][]int32 {
 func (g *Game) CalculateModelReward(cellState CellState, action ActionEvent) int {
 	reward := 0
 
-	// if g.FirstClick == nil {
-	// 	return 0
-	// }
 	switch g.State {
 	case Won:
 		return 100
