@@ -1,4 +1,4 @@
-package game
+// package game
 
 import (
 	"bytes"
@@ -36,46 +36,6 @@ var (
 	ErrAssetNotFound     = errors.New("game asset not found")
 )
 
-type ActionEvent int
-
-const (
-	RevealCell ActionEvent = iota
-	ToggleFlag
-)
-
-type GameState int
-
-const (
-	Playing GameState = iota
-	Won
-	Lost
-)
-
-type DificultyLevel int
-
-const (
-	Easy DificultyLevel = iota
-	Medium
-	Hard
-)
-
-var difficultyLevels = map[DificultyLevel]GameDifficulty{
-	Easy: {
-		GridDimensions: GridDimensions{Cols: 9, Rows: 9},
-		NumberOfMines:  10,
-	},
-
-	Medium: {
-		GridDimensions: GridDimensions{Cols: 16, Rows: 16},
-		NumberOfMines:  40,
-	},
-
-	Hard: {
-		GridDimensions: GridDimensions{Cols: 30, Rows: 16},
-		NumberOfMines:  99,
-	},
-}
-
 type AudioManager struct {
 	context *audio.Context
 	sounds  map[string]*audio.Player
@@ -92,15 +52,6 @@ var PositionNeighbors = []Coordinates{
 	{X: 1, Y: 0},
 	{X: 1, Y: 1},
 }
-
-type GameStatistics struct {
-	StartTime      time.Time
-	TimeElapsed    time.Duration
-	Clicks         int
-	FlagsAvailable int
-}
-
-type Board map[Coordinates]CellState
 
 type Game struct {
 	Board         Board
@@ -129,11 +80,6 @@ type CellState struct {
 	isFlag         bool
 	isRevealed     bool
 	isMineSelected bool
-}
-
-type ClickEvent struct {
-	Position Coordinates
-	IsFirst  bool
 }
 
 type Sprite struct {
